@@ -15,12 +15,11 @@ class MuonClient {
     console.log('Request URL:', MuonURL.href);
 
     try {
-      // Assuming makeHttpRequest now uses axios and returns directly the data part of the response
       const response = await makeHttpRequest(MuonURL.href);
-      return { result: response, success: true }; // Adjust according to the expected response structure
+      return { result: response, success: true }; 
     } catch (error) {
       console.error(`Error during request to ${baseUrl}:`, error);
-      return { success: false, error }; // Adjust error handling as needed
+      return { success: false, error }; 
     }
   }
 }

@@ -19,7 +19,6 @@ function toWeiBN(amount, decimals = 18) {
 }
 
 function toWei(amount, decimals = 18) {
-  // In JavaScript, handle null or undefined before converting to string
   const amountStr = (amount === null || amount === undefined) ? "0" : amount.toString();
   return BigInt(toWeiBN(amountStr, decimals).toFixed(0));
 }

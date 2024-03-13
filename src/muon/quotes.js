@@ -1,4 +1,4 @@
-const { MuonClient } = require("./base"); // Adjust the path as necessary
+const { MuonClient } = require("./base"); 
 const viem = require("viem");
 
 class QuotesClient extends MuonClient {
@@ -24,7 +24,7 @@ class QuotesClient extends MuonClient {
       const requestParams = this._getRequestParams(account, chainId, contractAddress, marketId);
       if (requestParams instanceof Error) throw requestParams;
 
-      console.info("Requesting data from Muon: ", requestParams);
+      //console.info("Requesting data from Muon: ", requestParams);
       let result, success;
 
       for (const url of urls) {

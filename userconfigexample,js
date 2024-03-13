@@ -1,0 +1,7 @@
+module.exports = {
+    ACCOUNT_NAME: "",
+    DEPOSIT_AMOUNT: 0, //Amount of Tokens
+    LOWER_THRESHOLD_PRICE: 0, //Lower Price (float)
+    UPPER_THRESHOLD_PRICE: 0, //Upper Price (float)
+    SYMBOL: '' // 'ETH'
+};

@@ -1,17 +1,12 @@
 require('dotenv').config();
 const { Web3 } = require('web3');
-const config = require('./config');
+const config = require('./symmconfig');
 const { multiAccountABI } = require('./abi/MultiAccount');
- 
-const multiAccountAddress = config.MULTI_ACCOUNT_ADDRESS; // The MultiAccount contract address
-const multiAccountABI = multiAccountABI; // The ABI for your MultiAccount contract
+const multiAccountAddress = config.MULTI_ACCOUNT_ADDRESS;
+const web3 = new Web3(new Web3.providers.HttpProvider(process.env.PROVIDER_URL));
 const multiAccount = new web3.eth.Contract(multiAccountABI, multiAccountAddress);
-
-if ('addAccount' in multiAccount.methods) {
-    console.log("addAccount method is available.");
-} else {
-    console.log("addAccount method is NOT available. Check ABI and contract address.");
-}
+const account = web3.eth.accounts.privateKeyToAccount(process.env.WALLET_PRIVATE_KEY);
+web3.eth.accounts.wallet.add(account);
 
 
 async function addAccount(accountName) {
@@ -36,9 +31,8 @@ async function addAccount(accountName) {
 
     if (receipt.events.AddAccount) {
       const event = receipt.events.AddAccount.returnValues;
-      console.log("Sender: ", event.user); // The sender's address
-      console.log("Account Address: ", event.account); // The new account's address
-      console.log("Account Name: ", event.name); // The name of the new account
+      console.log("Account Created. Address: ", event.account); 
+      return event.account;
       } else {
           console.log("No AddAccount event found.");
         }
@@ -48,14 +42,4 @@ async function addAccount(accountName) {
   }
 }
 
-
-
-async function main() {
-  addAccount(accountName)
-  //await addAccount(yourAccountName);
-  //await estimateGasPeriodically('addAccount', 5000);
-}
-
-
-
-main().catch(console.error);
+module.exports = { addAccount };
