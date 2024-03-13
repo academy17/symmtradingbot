@@ -12,6 +12,7 @@ class MuonClient {
     requestParams.forEach((param) => {
       MuonURL.searchParams.append(`params[${param[0]}]`, param[1]);
     });
+    console.log('Request URL:', MuonURL.href);
 
     try {
       // Assuming makeHttpRequest now uses axios and returns directly the data part of the response

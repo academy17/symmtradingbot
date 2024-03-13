@@ -1,8 +1,6 @@
 const { MuonClient } = require("./base"); // Adjust the path as necessary
 const viem = require("viem");
 
-chainId: "0x89",
-
 class QuotesClient extends MuonClient {
   constructor() {
     super({ APP_METHOD: "uPnl_A_withSymbolPrice" });
@@ -14,8 +12,6 @@ class QuotesClient extends MuonClient {
     }
     return null;
   }
-
-  //
 
   async getMuonSig(
     account, 
@@ -45,17 +41,17 @@ class QuotesClient extends MuonClient {
       }
 
       if (success) {
-        console.info("Response from Muon: ", result);
+        const reqId = result.result.reqId;
+        const timestamp = result.result.data.timestamp ? BigInt(result.result.data.timestamp) : BigInt(0);
+        console.log("timestamp: ", timestamp);
+        const upnl = result.result.data.result.uPnl ? BigInt(result.result.data.result.uPnl) : BigInt(0);
+        const price = result.result.data.result.price ? BigInt(result.result.data.result.price) : BigInt(0);
+        
+        const gatewaySignature = result.result.nodeSignature;
 
-        const reqId = result.reqId;
-        const timestamp = BigInt(result.data.timestamp);
-        const upnl = BigInt(result.data.result.uPnl);
-        const price = BigInt(result.data.result.price);
-        const gatewaySignature = result.nodeSignature;
-
-        const signature = BigInt(result.signatures[0].signature);
-        const owner = result.signatures[0].owner;
-        const nonce = result.data.init.nonceAddress;
+        const signature = result.result.signatures[0].signature ? BigInt(result.result.signatures[0].signature) : BigInt(0);
+        const owner = result.result.signatures[0].owner;
+        const nonce = result.result.data.init.nonceAddress;
 
         const generatedSignature = {
           reqId,
@@ -67,6 +63,7 @@ class QuotesClient extends MuonClient {
         };
 
         return { success: true, signature: generatedSignature };
+        
       } else {
         throw new Error("Muon request unsuccessful");
       }
@@ -91,4 +88,4 @@ class QuotesClient extends MuonClient {
   }
 }
 
-module.exports = { QuotesClient };
+module.exports = QuotesClient;
