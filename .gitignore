@@ -1,7 +1,7 @@
 .env
-config.js
 aaa.js
 tsconfig.json
 node_modules/
 notes.js
 userconfig.js
+symmconfig.js
