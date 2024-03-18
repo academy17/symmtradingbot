@@ -6,6 +6,7 @@ const axios = require('axios');
 const config = require('./symmconfig');
 const userConfig = require('./userconfig');
 
+const diamondABI = require('./abi/Diamond');
 const collateralABI = require('./abi/FakeStableCoinABI');
 const { multiAccountABI } = require('./abi/MultiAccount');
 const { addAccount } = require('./addAccount'); 
@@ -15,6 +16,7 @@ const userconfig = require('./userconfig');
 
 const web3 = new Web3(new Web3.providers.HttpProvider(process.env.PROVIDER_URL));
 const collateralContract = new web3.eth.Contract(collateralABI, config.COLLATERAL_ADDRESS);
+const diamondContract = new web3.eth.Contract(diamondABI, config.DIAMOND_ADDRESS);
 const multiAccountContract = new web3.eth.Contract(multiAccountABI, config.MULTI_ACCOUNT_ADDRESS);
 const account = web3.eth.accounts.privateKeyToAccount(process.env.WALLET_PRIVATE_KEY);
 web3.eth.accounts.wallet.add(account);
@@ -98,7 +100,7 @@ async function getMuonSigImplementation(botAddress) {
   const urls = [ process.env.MUON_URL ];
   const chainId = 137;
   const contractAddress = config.DIAMOND_ADDRESS;
-  const marketId = 2;
+  const marketId = 4;
   try {
       const requestParams = quotesClient._getRequestParams(account, chainId, contractAddress, marketId);
       //console.info("Requesting data from Muon with params: ", requestParams);
@@ -193,6 +195,7 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
 
   if (signatureResult.success) {
     const { reqId, timestamp, upnl, price, gatewaySignature, sigs } = signatureResult.signature;
+    console.log("Price of asset: ", price);
     if (typeof reqId === 'undefined' || !reqId.startsWith('0x')) {
       console.error("reqId is undefined or not a hex string:", reqId);
     }
@@ -201,11 +204,11 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
     }
     
     const upnlSigFormatted = {
-        reqId: reqId,
+        reqId: web3.utils.hexToBytes(reqId),
         timestamp: timestamp.toString(),
         upnl: upnl.toString(),
         price: price.toString(),
-        gatewaySignature: gatewaySignature,
+        gatewaySignature: web3.utils.hexToBytes(gatewaySignature),
         sigs: {
             signature: sigs.signature.toString(),
             owner: sigs.owner,
@@ -215,16 +218,18 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
 
     console.log("Muon Request successful, forwarding formatted signature to contract... ", upnlSigFormatted);
     const partyBsWhiteList = [config.PARTY_B_WHITELIST];
-    //const symbolId = 2; //ETH
-    //const positionType = positionType; 
-    const orderType = 1; //MARKET
-    const quantity = web3.utils.toWei('100', 'ether').toString(); 
-    const cva = web3.utils.toWei('1', 'ether').toString();
-    const lf = web3.utils.toWei('1', 'ether').toString(); 
-    const partyAmm = web3.utils.toWei('1', 'ether').toString(); 
-    const partyBmm = web3.utils.toWei('1', 'ether').toString(); 
-    const maxFundingRateScaled = web3.utils.toWei('0.02', 'ether').toString(); 
-    const deadline = (Math.floor(Date.now() / 1000) + 120).toString();
+    const symbolId = 4;
+    const positionType = 1; // Assuming 1 represents the correct position type in your contract's enum
+    const orderType = 1; // MARKET order
+    // Assuming these values are meant to be in ether for conversion purposes
+    const quantity = web3.utils.toWei('161.5', 'ether'); // Example conversion, adjust according to actual unit
+    const cva = web3.utils.toWei('0.77055849', 'ether'); // Adjusted for example purposes
+    const lf = web3.utils.toWei('0.51370566', 'ether'); // Adjusted for example purposes
+    const partyAmm = web3.utils.toWei('97.50528585', 'ether'); // Adjusted for example purposes
+    const partyBmm = '0'; // No conversion needed
+    const maxFundingRate = web3.utils.toWei('200', 'ether'); // Assuming this was meant as a conversion from Ether to Wei
+    const deadline = (Math.floor(Date.now() / 1000) + 120).toString(); // Deadline adjusted for example
+    
 
     const sendQuoteParameters = [
       partyBsWhiteList,
@@ -237,7 +242,7 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
       lf.toString(),
       partyAmm.toString(),
       partyBmm.toString(), 
-      maxFundingRateScaled.toString(), 
+      maxFundingRate.toString(), 
       deadline.toString(),
       upnlSigFormatted
   ];
@@ -251,21 +256,30 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
     [ encodedSendQuoteData ]
   ];
   
-  //console.log("Calldata: ", _callData);
+  console.log("Calldata: ", _callData);
 
     try {
+      const bufferPercentage = 0.20; // 20% buffer
+      const bufferFactor = BigInt(Math.floor(bufferPercentage * 100)); // Convert 20% to BigInt, and use 100 as base to avoid floating point.
+      
+      // Calculate the adjustedGasLimit as a BigInt
       const sendQuoteGasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
       console.log("Estimated Gas: ", sendQuoteGasEstimate);
-    
+      
+      // Adjust the gas limit by adding a buffer, making sure to convert everything involved to BigInt.
+      const adjustedGasLimit = sendQuoteGasEstimate + (sendQuoteGasEstimate * bufferFactor / BigInt(100));
+      console.log("Adjusted Gas Limit: ", adjustedGasLimit);
+      
       const sendQuotePrice = await web3.eth.getGasPrice();
       console.log("Current Gas Price: ", sendQuotePrice);
-    
-    const sendQuoteReceipt = await multiAccountContract.methods._call(..._callData).send({
-    from: myAddress,
-    gas: adjustedGasLimit,
-    gasPrice: sendQuotePrice
-    });
-
+      
+      // When using the adjusted values, ensure they are passed in a format accepted by your methods (likely as strings for web3)
+      const sendQuoteReceipt = await multiAccountContract.methods._call(..._callData).send({
+        from: account.address,
+        gas: adjustedGasLimit.toString(), // Convert BigInt to string for web3
+        gasPrice: sendQuotePrice.toString() // Convert BigInt to string for web3
+      });
+      
   console.log('Transaction receipt:', sendQuoteReceipt);
 
     } catch (error) {
@@ -301,46 +315,51 @@ async function startPriceMonitoring(botAddress) {
 
 async function handleMessage(message, botAddress, marketId) {
   const data = JSON.parse(message);
-  const price = parseFloat(data.data.c); 
+  const price = parseFloat(data.data.c);
   console.log("Current Price of ETH: ", price, "Lower:", userConfig.LOWER_THRESHOLD_PRICE, "Upper:", userConfig.UPPER_THRESHOLD_PRICE);
-  if (price > userConfig.UPPER_THRESHOLD_PRICE && accountSetup) {
-      console.log(`Price over threshold: ${price}`);
-      try {
-        console.log("Shorting...");
-          await executeSendQuoteMarket(botAddress, marketId, 1); //market shorting if price goes above a certain threshold
-          console.log("Bot Closed");
-          process.exit(0);
-      } catch (error) {
-          console.error("Failed to execute quote:", error);
-          console.log("Bot Closed");
-          process.exit(0);
-      }
+  
+  // Function to cleanly close resources and exit
+  function closeAndExit(error) {
+    if (error) {
+      console.error("Failed to execute quote:", error);
+    }
+    if (binanceWs && binanceWs.close) {
+      binanceWs.close();
+    }
+    console.log("Bot Closed");
+    process.exit(0);
   }
-  if (price < userConfig.LOWER_THRESHOLD_PRICE && accountSetup) {
+
+  if (price > userConfig.UPPER_THRESHOLD_PRICE && accountSetup) {
+    console.log(`Price over threshold: ${price}`);
+    try {
+      console.log("Shorting...");
+      await executeSendQuoteMarket(botAddress, marketId, 1); // Market shorting if price goes above a certain threshold
+      closeAndExit();
+    } catch (error) {
+      closeAndExit(error);
+    }
+  } else if (price < userConfig.LOWER_THRESHOLD_PRICE && accountSetup) {
     console.log(`Price under threshold: ${price}`);
     try {
       console.log("Longing...");
-        await executeSendQuoteMarket(botAddress, marketId, 0); //market longing if price goes below a certain threshold
-        console.log("Bot Closed");
-        process.exit(0);
+      await executeSendQuoteMarket(botAddress, marketId, 0); // Market longing if price goes below a certain threshold
+      closeAndExit();
     } catch (error) {
-        console.error("Failed to execute quote:", error);
-        binanceWs.close(); 
-        console.log("Bot Closed");
-        process.exit(0);
-
+      closeAndExit(error);
     }
-}
+  }
 }
 
 async function run() {
 try {
 
-    const tradingBotAddress = await addAccount(userConfig.ACCOUNT_NAME);
-    const amountToMint = web3.utils.toWei(userConfig.DEPOSIT_AMOUNT, 'ether'); 
-    await mintCollateralTokens(amountToMint);
-    await depositAndAllocateForAccount(tradingBotAddress, amountToMint);
-
+    //const tradingBotAddress = await addAccount(userConfig.ACCOUNT_NAME);
+    const tradingBotAddress = '0xd4BF55F4c75ebcD11E99AB55babe869bd0D5d3c9';
+    //const amountToMint = web3.utils.toWei(userConfig.DEPOSIT_AMOUNT, 'ether'); 
+    //await mintCollateralTokens(amountToMint);
+    //await depositAndAllocateForAccount(tradingBotAddress, amountToMint);
+    console.log(tradingBotAddress);
     readyToTrade(); //Trading is now allowed...
     console.log("Bot setup successful. ");
     await startPriceMonitoring(tradingBotAddress);
