@@ -74,9 +74,7 @@ async function getMuonSigImplementation(botAddress) {
                 nonce: data.init.nonceAddress, 
             }
         };
-  
-        //console.log("Generated Signature: ", generatedSignature);
-        return { success: true, signature: generatedSignature };
+          return { success: true, signature: generatedSignature };
     } catch (error) {
         console.error('Error getting Muon signature:', error);
         return { success: false, error: error.toString() };
@@ -114,16 +112,14 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
   
       console.log("Muon Request successful, forwarding formatted signature to contract... ", upnlSigFormatted);
       const partyBsWhiteList = [config.PARTY_B_WHITELIST];
-        //const symbolId = 4; // Example symbolId, adjust as needed
-        //const positionType = 1; // Assuming 1 represents the correct position type in your contract's enum
-        const orderType = 1; // MARKET order
-        const quantity = web3.utils.toWei('302.6', 'ether').toString(); // Adjusted to match provided input
-        const cva = web3.utils.toWei('1.539846672', 'ether').toString(); // Adjusted to match provided input
-        const lf = web3.utils.toWei('1.026564448', 'ether').toString(); // Adjusted to match provided input
-        const partyAmm = web3.utils.toWei('194.84982888', 'ether').toString(); // Adjusted to match provided input
+        const orderType = 1; 
+        const quantity = web3.utils.toWei('302.6', 'ether').toString(); 
+        const cva = web3.utils.toWei('1.539846672', 'ether').toString(); 
+        const lf = web3.utils.toWei('1.026564448', 'ether').toString(); 
+        const partyAmm = web3.utils.toWei('194.84982888', 'ether').toString(); 
         const partyBmm = '0'; // Assuming no partyBmm for this example
-        const maxFundingRate = web3.utils.toWei('200', 'ether').toString(); // Adjusted to match provided input
-        const deadline = (Math.floor(Date.now() / 1000) + 120).toString(); // Deadline adjusted for example
+        const maxFundingRate = web3.utils.toWei('200', 'ether').toString(); 
+        const deadline = (Math.floor(Date.now() / 1000) + 120).toString();
 
   
       const sendQuoteParameters = [
@@ -142,14 +138,13 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
         upnlSigFormatted
     ];
   
-    //console.log("sendQuoteParameters: ", sendQuoteParameters);
     const encodedSendQuoteData = diamondContract.methods.sendQuote(...sendQuoteParameters).encodeABI();
     const _callData = [
       botAddress,
       [ encodedSendQuoteData ]
     ];
     const jsonPayload = JSON.stringify(sendQuoteParameters);
-    console.log("JSON Payload for API or Simulation:", jsonPayload);
+    console.log("JSON Payload for API:", jsonPayload);
     console.log("Calldata: ", _callData);
 
       try {

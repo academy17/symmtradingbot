@@ -17,26 +17,32 @@ async function addAccount(accountName) {
 
   try {
     const currentGasPrice = await web3.eth.getGasPrice();
-    const gasPriceBigInt = web3.utils.toBigInt(currentGasPrice); 
+    // Convert currentGasPrice to BigInt and increase it by 20%
+    const increasedGasPriceBigInt = BigInt(currentGasPrice) * BigInt(120) / BigInt(100);
+
     const gasEstimate = await multiAccount.methods.addAccount(accountName).estimateGas({ from: account.address });
-    console.log("Gas estimate: ", gasEstimate);
+    // Convert gasEstimate to BigInt before adding a buffer to prevent mixing types
+    const gasEstimateBigInt = BigInt(gasEstimate);
+    // Add a 20% buffer to the gas estimate
+    const gasLimitWithBuffer = gasEstimateBigInt + (gasEstimateBigInt * BigInt(20) / BigInt(100));
+    console.log("Gas estimate with buffer: ", gasLimitWithBuffer.toString());
+
     const receipt = await multiAccount.methods.addAccount(accountName).send({
       from: account.address,
-      gas: gasEstimate,
-      gasPrice: gasPriceBigInt.toString()
+      gas: gasLimitWithBuffer.toString(), // Convert to string for the web3 method
+      gasPrice: increasedGasPriceBigInt.toString()
     });
 
     console.log("Account Creation Successful. Transaction hash: ", receipt.transactionHash);
-    console.log("Gas Cost: ", gasPriceBigInt.toString());
+    console.log("Gas Cost: ", increasedGasPriceBigInt.toString());
 
     if (receipt.events.AddAccount) {
       const event = receipt.events.AddAccount.returnValues;
-      console.log("Account Created. Address: ", event.account); 
+      console.log("Account Created. Address: ", event.account);
       return event.account;
-      } else {
-          console.log("No AddAccount event found.");
-        }
-
+    } else {
+      console.log("No AddAccount event found.");
+    }
   } catch (error) {
     console.error("Failed to add account:", error);
   }
