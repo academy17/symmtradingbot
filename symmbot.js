@@ -441,73 +441,6 @@ async function handleMessage(message, botAddress, marketId, binanceWs) {
   }
 }
 
-async function testFunction(slippage, positionType) {
-  const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, userConfig.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, userConfig.LEVERAGE);
-  console.log(markets[0].name);
-  console.log(markets[0].symbol);
-  const autoSlippage = markets[0].autoSlippage;
-  let adjustedPrice = BigInt(651569270000000000);
-  let numericSlippage; 
-  console.log(autoSlippage);
-  if (slippage === "auto") {
-    const autoSlippageNumerator = BigInt(Math.floor(autoSlippage * 1000)); 
-    const autoSlippageDenominator = BigInt(1000);
-    adjustedPrice = positionType === 1
-      ? (adjustedPrice * autoSlippageDenominator) / autoSlippageNumerator
-      : (adjustedPrice * autoSlippageNumerator) / autoSlippageDenominator;
-  } else {
-    numericSlippage = Number(slippage); 
-    if (isNaN(numericSlippage)) {
-      console.error("Slippage must be a number or 'auto'");
-      return;
-    }
-    const spSigned = positionType === 1 ? numericSlippage : -numericSlippage;
-    const slippageFactored = (100 - spSigned) / 100;
-    const slippageFactorBigInt = BigInt(Math.floor(slippageFactored * 100));
-    adjustedPrice = (adjustedPrice * slippageFactorBigInt) / BigInt(100);
-  }
-
-  const requestedPrice = adjustedPrice;
-  console.log( requestedPrice.toString());
-  const testPrice = 636100000000000000;
-  const testQuantity = 163.1;
-  const requestedQuantityWei = web3.utils.toWei(testQuantity.toString(), 'ether');
-  const notionalValue = new BigNumber(requestedQuantityWei * testPrice);
-
-  const cvaWei = notionalValue
-  * (new BigNumber(lockedParams.cva * 100))
-  / (new BigNumber(10000)) 
-  / (new BigNumber(lockedParams.leverage))
-  / (new BigNumber(1e18));
-
-  console.log("cvaWei: ", cvaWei);
-
-  const lfWei = notionalValue
-  * (new BigNumber(lockedParams.lf * 100))
-  / (new BigNumber(10000)) 
-  / (new BigNumber(lockedParams.leverage))
-  / (new BigNumber(1e18));
-
-  console.log("lfWei: ", lfWei);
-
-  
-  const partyAmmWei = notionalValue
-  * (new BigNumber(lockedParams.partyAmm * 100))
-  / (new BigNumber(10000)) 
-  / (new BigNumber(lockedParams.leverage))
-  / (new BigNumber(1e18));
-
-  console.log("partyAmm: ", partyAmmWei);
-
-  const partyBmmWei = notionalValue
-  * (new BigNumber(lockedParams.partyBmm * 100))
-  / (new BigNumber(10000)) 
-  / (new BigNumber(lockedParams.leverage))
-  / (new BigNumber(1e18));
-
-  console.log("partyBmm: ", partyBmmWei);
-}
 
 async function run() {
 try {
@@ -519,7 +452,6 @@ try {
     readyToTrade(); //Trading is now allowed...
     console.log("Bot setup successful. ");
     await startPriceMonitoring(tradingBotAddress);
-    //await testFunction("auto", 1);
   } catch (error) {
       console.error("Error in bot setup:", error);
   }
