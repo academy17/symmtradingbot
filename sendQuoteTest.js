@@ -159,7 +159,7 @@ async function executeSendQuoteMarket(botAddress, symbolId, positionType) {
       from: account.address
       });
   
-    console.log('Transaction receipt:', sendQuoteReceipt);
+    //console.log('Transaction receipt:', sendQuoteReceipt);
   
       } catch (error) {
           console.error('Error sending quote:', error);

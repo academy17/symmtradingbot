@@ -23,8 +23,6 @@ class QuotesClient extends MuonClient {
     try {
       const requestParams = this._getRequestParams(account, chainId, contractAddress, marketId);
       if (requestParams instanceof Error) throw requestParams;
-
-      //console.info("Requesting data from Muon: ", requestParams);
       let result, success;
 
       for (const url of urls) {
@@ -46,9 +44,7 @@ class QuotesClient extends MuonClient {
         console.log("timestamp: ", timestamp);
         const upnl = result.result.data.result.uPnl ? BigInt(result.result.data.result.uPnl) : BigInt(0);
         const price = result.result.data.result.price ? BigInt(result.result.data.result.price) : BigInt(0);
-        
         const gatewaySignature = result.result.nodeSignature;
-
         const signature = result.result.signatures[0].signature ? BigInt(result.result.signatures[0].signature) : BigInt(0);
         const owner = result.result.signatures[0].owner;
         const nonce = result.result.data.init.nonceAddress;

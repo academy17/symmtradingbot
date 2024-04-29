@@ -17,19 +17,15 @@ async function addAccount(accountName) {
 
   try {
     const currentGasPrice = await web3.eth.getGasPrice();
-    // Convert currentGasPrice to BigInt and increase it by 20%
     const increasedGasPriceBigInt = BigInt(currentGasPrice) * BigInt(120) / BigInt(100);
-
     const gasEstimate = await multiAccount.methods.addAccount(accountName).estimateGas({ from: account.address });
-    // Convert gasEstimate to BigInt before adding a buffer to prevent mixing types
     const gasEstimateBigInt = BigInt(gasEstimate);
-    // Add a 20% buffer to the gas estimate
     const gasLimitWithBuffer = gasEstimateBigInt + (gasEstimateBigInt * BigInt(20) / BigInt(100));
     console.log("Gas estimate with buffer: ", gasLimitWithBuffer.toString());
 
     const receipt = await multiAccount.methods.addAccount(accountName).send({
       from: account.address,
-      gas: gasLimitWithBuffer.toString(), // Convert to string for the web3 method
+      gas: gasLimitWithBuffer.toString(), 
       gasPrice: increasedGasPriceBigInt.toString()
     });
 

@@ -12,7 +12,7 @@ class MuonClient {
     requestParams.forEach((param) => {
       MuonURL.searchParams.append(`params[${param[0]}]`, param[1]);
     });
-    console.log('Request URL:', MuonURL.href);
+    //console.log('Request URL:', MuonURL.href);
 
     try {
       const response = await makeHttpRequest(MuonURL.href);

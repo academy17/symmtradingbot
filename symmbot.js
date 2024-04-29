@@ -150,7 +150,6 @@ async function getMuonSigImplementation(botAddress) {
           }
       };
 
-      //console.log("Generated Signature: ", generatedSignature);
       return { success: true, signature: generatedSignature };
   } catch (error) {
       console.error('Error getting Muon signature:', error);
@@ -294,7 +293,7 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
 
-    console.log("cvaWei: ", cvaWei);
+    //console.log("cvaWei: ", cvaWei);
 
 
     //LF
@@ -304,7 +303,7 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
   
-    console.log("lfWei: ", lfWei);
+    //console.log("lfWei: ", lfWei);
 
     const partyAmmWei = notionalValue
     * (new BigNumber(lockedParams.partyAmm * 100))
@@ -312,7 +311,7 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
   
-    console.log("partyAmm: ", partyAmmWei);
+    //console.log("partyAmm: ", partyAmmWei);
   
     const partyBmmWei = notionalValue
     * (new BigNumber(lockedParams.partyBmm * 100))
@@ -320,7 +319,7 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
   
-    console.log("partyBmm: ", partyBmmWei);
+    //console.log("partyBmm: ", partyBmmWei);
   
     //Max funding and deadline
     const maxFundingRate = web3.utils.toWei('200', 'ether'); 
@@ -364,7 +363,7 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
         gasPrice: sendQuotePrice.toString() 
       });
       
-  console.log('Transaction receipt:', sendQuoteReceipt);
+  //console.log('Transaction receipt:', sendQuoteReceipt);
 
     } catch (error) {
         console.error('Error sending quote:', error);
@@ -412,35 +411,58 @@ async function startPriceMonitoring(botAddress) {
 }
 
 let actionTaken = false;
-async function handleMessage(message, botAddress, marketId, binanceWs) {
-  if (actionTaken) return; /
-  const data = JSON.parse(message);
-  const price = parseFloat(data.data.c);
-  console.log(`Current Price of ${userConfig.SYMBOL}: `, price, "Lower:", userConfig.LOWER_THRESHOLD_PRICE, "Upper:", userConfig.UPPER_THRESHOLD_PRICE);
+let debouncer;
 
-  if (price > userConfig.UPPER_THRESHOLD_PRICE && accountSetup) {
-      console.log(`Price over threshold: ${price}`);
-      try {
-          console.log("Shorting...");
-          await executeSendQuoteMarket(botAddress, 1, userConfig.QUANTITY, "auto");
-          actionTaken = true; // Prevent further actions
-          closeAndExit(binanceWs);
-      } catch (error) {
-          closeAndExit(binanceWs, error);
-      }
-  } else if (price < userConfig.LOWER_THRESHOLD_PRICE && accountSetup) {
-      console.log(`Price under threshold: ${price}`);
-      try {
-          console.log("Longing...");
-          await executeSendQuoteMarket(botAddress, 0, userConfig.QUANTITY, "auto"); 
-          actionTaken = true; 
-          closeAndExit(binanceWs);
-      } catch (error) {
-          closeAndExit(binanceWs, error);
-      }
-  }
+async function handleMessage(message, botAddress, marketId, binanceWs) {
+    if (actionTaken) return;
+
+    const data = JSON.parse(message);
+    const price = parseFloat(data.data.c);
+    console.log(`Current Price of ${userConfig.SYMBOL}: `, price, "Lower:", userConfig.LOWER_THRESHOLD_PRICE, "Upper:", userConfig.UPPER_THRESHOLD_PRICE);
+
+    if (price > userConfig.UPPER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
+        console.log(`Price over threshold: ${price}`);
+        actionTaken = true;  // Set actionTaken true immediately before the async operation
+        try {
+            console.log("Shorting...");
+            await executeSendQuoteMarket(botAddress, 1, userConfig.QUANTITY, "auto");
+            closeAndExit(binanceWs);
+        } catch (error) {
+            console.error("Error during short:", error);
+            closeAndExit(binanceWs);
+        }
+    } else if (price < userConfig.LOWER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
+        console.log(`Price under threshold: ${price}`);
+        actionTaken = true;  // Set actionTaken true immediately before the async operation
+        try {
+            console.log("Longing...");
+            await executeSendQuoteMarket(botAddress, 0, userConfig.QUANTITY, "auto");
+            console.log("Long Successful!")
+            closeAndExit(binanceWs);
+        } catch (error) {
+            console.error("Error during long:", error);
+            closeAndExit(binanceWs);
+        }
+    }
+
+    // Setup debouncer to reset actionTaken after 30 seconds
+    clearTimeout(debouncer);
+    debouncer = setTimeout(() => {
+        actionTaken = false;
+    }, 30000);
 }
 
+function closeAndExit(binanceWs, error) {
+    if (error) console.error("Exiting due to error:", error);
+    binanceWs.close();
+    console.log("WebSocket closed.");
+}
+
+function closeAndExit(binanceWs, error) {
+    if (error) console.error("Exiting due to error:", error);
+    binanceWs.close();
+    console.log("WebSocket closed.");
+}
 
 async function run() {
 try {
