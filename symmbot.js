@@ -104,58 +104,29 @@ async function getMuonSigImplementation(botAddress) {
       console.log('QuotesClient is not enabled or failed to instantiate.');
       return { success: false, error: 'QuotesClient initialization failed' };
   }
+
   const account = botAddress;
   const appName = 'symmio';
-  const urls = [ process.env.MUON_URL ];
+  const urls = [process.env.MUON_URL];
   const chainId = 137;
   const contractAddress = config.DIAMOND_ADDRESS;
   const marketId = 4;
+
   try {
-      const requestParams = quotesClient._getRequestParams(account, chainId, contractAddress, marketId);
-      //console.info("Requesting data from Muon with params: ", requestParams);
-      let response = null; 
-      for (const url of urls) {
-          try {
-              const res = await quotesClient._sendRequest(url, appName, requestParams);
-              if (res && res.success) {
-                  response = res.result; 
-                  //console.log("Full response from Muon:", response);
-                  break;
-              }
-          } catch (error) {
-              console.log("Retrying with the next URL...");
-          }
-      }
+    const result = await quotesClient.getMuonSig(account, appName, urls, chainId, contractAddress, marketId);
 
-      if (!response) {
-          throw new Error("Muon request unsuccessful or result is missing");
-      }
-      const muonResponse = response.result; 
-
-      const { reqId, data, signatures } = muonResponse;
-      if (!signatures || signatures.length === 0) {
-          throw new Error("Signatures missing in the Muon response");
-      }
-      const signatureData = signatures[0];
-      const generatedSignature = {
-          reqId: reqId,
-          timestamp: BigInt(data.timestamp),
-          upnl: BigInt(data.result.uPnl),
-          price: BigInt(data.result.price),
-          gatewaySignature: response.result.nodeSignature,
-          sigs: {
-              signature: BigInt(signatureData.signature),
-              owner: signatureData.owner,
-              nonce: data.init.nonceAddress, 
-          }
-      };
-
-      return { success: true, signature: generatedSignature };
+    if (result.success) {
+      console.log('Successfully retrieved Muon signature:', result.signature);
+      return { success: true, signature: result.signature };
+    } else {
+      throw new Error(result.error || 'Unknown error');
+    }
   } catch (error) {
-      console.error('Error getting Muon signature:', error);
-      return { success: false, error: error.toString() };
+    console.error('Error getting Muon signature:', error);
+    return { success: false, error: error.toString() };
   }
 }
+
 async function fetchMarketSymbolId(url, symbol) {
   if (!url) {
     throw new Error("hedgerUrl is empty");
