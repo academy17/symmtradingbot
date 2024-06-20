@@ -625,8 +625,8 @@ try {
     const amountToMint = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
     await mintCollateralTokens(amountToMint);
     await depositAndAllocateForAccount(subAccountAddress, amountToMint);
-    await deallocateForAccount(subAccountAddress, amountToMint);
-    await withdrawFromAccount('0xFD2a852A6D5aA733a64F3a10Ba163cF8CCd3D6F7', amountToMint);
+    //await deallocateForAccount(subAccountAddress, amountToMint);
+    //await withdrawFromAccount(subAccountAddress, amountToMint);
     console.log(subAccountAddress);
     readyToTrade(); //Trading is now allowed...
     console.log("Bot setup successful. ");
@@ -636,4 +636,4 @@ try {
   }
 }
 
-run();
+run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
