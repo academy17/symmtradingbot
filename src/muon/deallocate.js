@@ -1,27 +1,21 @@
-const { MuonClient } = require("./base"); 
+const { MuonClient } = require("./base");
 const viem = require("viem");
 
-class QuotesClient extends MuonClient {
+class DeallocateClient extends MuonClient {
   constructor() {
-    super({ APP_METHOD: "uPnl_A_withSymbolPrice" });
+    super({ APP_METHOD: "uPnl_A" });
   }
 
   static createInstance(isEnabled) {
     if (isEnabled) {
-      return new QuotesClient();
+      return new DeallocateClient();
     }
     return null;
   }
 
-  async getMuonSig(
-    account, 
-    appName, 
-    urls, 
-    chainId, 
-    contractAddress, 
-    marketId) {
+  async getMuonSig(account, appName, urls, chainId, contractAddress) {
     try {
-      const requestParams = this._getRequestParams(account, chainId, contractAddress, marketId);
+      const requestParams = this._getRequestParams(account, chainId, contractAddress);
       if (requestParams instanceof Error) throw requestParams;
       let result, success;
 
@@ -39,11 +33,11 @@ class QuotesClient extends MuonClient {
       }
 
       if (success) {
+
+        
         const reqId = result.result.reqId;
         const timestamp = result.result.data.timestamp ? BigInt(result.result.data.timestamp) : BigInt(0);
-        console.log("timestamp: ", timestamp);
         const upnl = result.result.data.result.uPnl ? BigInt(result.result.data.result.uPnl) : BigInt(0);
-        const price = result.result.data.result.price ? BigInt(result.result.data.result.price) : BigInt(0);
         const gatewaySignature = result.result.nodeSignature;
         const signature = result.result.signatures[0].signature;
         const owner = result.result.signatures[0].owner;
@@ -53,13 +47,11 @@ class QuotesClient extends MuonClient {
           reqId,
           timestamp,
           upnl,
-          price: price ? price : toWei(0),
           gatewaySignature,
           sigs: { signature, owner, nonce },
         };
         console.log("Generated Signature: ", generatedSignature);
         return { success: true, signature: generatedSignature };
-        
       } else {
         throw new Error("Muon request unsuccessful");
       }
@@ -82,4 +74,4 @@ class QuotesClient extends MuonClient {
   }
 }
 
-module.exports = QuotesClient;
+module.exports = DeallocateClient;

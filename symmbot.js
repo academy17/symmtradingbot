@@ -1,35 +1,108 @@
-require('dotenv').config();
+require('dotenv').config()
+
+//CONFIG
+// Define configuration
+const config = {
+
+  // SYMM Config values
+  COLLATERAL_SYMBOL: "TEST",
+  COLLATERAL_DECIMALS: 18,
+  COLLATERAL_ADDRESS: "0x50E88C692B137B8a51b6017026Ef414651e0d5ba",
+
+  DIAMOND_ADDRESS: "0x976c87Cd3eB2DE462Db249cCA711E4C89154537b",
+  MULTI_ACCOUNT_ADDRESS: "0x3adc81CC43d9e1636de9cbac764Afcb1F3ae6cde",
+  PARTY_B_WHITELIST: "0x5044238ea045585C704dC2C6387D66d29eD56648",
+  SIGNATURE_STORE_ADDRESS: "0x6B6f6A6CCdB4Df5cc462096bEAdFd609D8e281d1",
+
+  MULTICALL3_ADDRESS: "0x1F98415757620B543A52E61c46B32eB19261F984",
+  USDC_ADDRESS: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+  WRAPPED_NATIVE_ADDRESS: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
+  ANALYTICS_SUBGRAPH_ADDRESS: "https://api.thegraph.com/subgraphs/name/symmiograph/symmiomain_polygon_8_2",
+  ORDER_HISTORY_SUBGRAPH_ADDRESS: "https://api.thegraph.com/subgraphs/name/symmiograph/symmiomain_polygon_8_2",
+  HEDGER_URL: 'https://alpha-hedger.rasa.capital/',
+
+// User Config values
+ACCOUNT_NAME: "TEST",
+DEPOSIT_AMOUNT: 200, // Amount of Tokens
+LOWER_THRESHOLD_PRICE: 0, // Lower Price (float)
+UPPER_THRESHOLD_PRICE: 0, // Upper Price (float)
+SYMBOL: '', // 'ETH'
+QUANTITY: 0, // Units of Requested Quantity
+LEVERAGE: 0, // Leverage
+ORDERTYPE: 0//
+}
+
+
 const { Web3 } = require('web3');
 const WebSocket = require('ws');
 const { toWei, toWeiBN } = require('./src/utils/numbers');
 const BigNumber = require('bignumber.js');
 const axios = require('axios');
-const config = require('./symmconfig');
-const userConfig = require('./userconfig');
+
+//ABIs
 const diamondABI = require('./abi/Diamond');
 const collateralABI = require('./abi/FakeStableCoinABI');
 const { multiAccountABI } = require('./abi/MultiAccount');
-const { addAccount } = require('./addAccount'); 
 const { sendQuoteFunctionAbi, _callAbi } = require('./abi/SendQuote');
+const { deallocateFunctionAbi} = require('./abi/Deallocate');
+
+//MUON
 const QuotesClient = require('./src/muon/quotes');
-const userconfig = require('./userconfig');
+const DeallocateClient = require('./src/muon/deallocate');
+
+//WEB3 Contracts
 const web3 = new Web3(new Web3.providers.HttpProvider(process.env.PROVIDER_URL));
 const collateralContract = new web3.eth.Contract(collateralABI, config.COLLATERAL_ADDRESS);
 const diamondContract = new web3.eth.Contract(diamondABI, config.DIAMOND_ADDRESS);
 const multiAccountContract = new web3.eth.Contract(multiAccountABI, config.MULTI_ACCOUNT_ADDRESS);
-const account = web3.eth.accounts.privateKeyToAccount(process.env.WALLET_PRIVATE_KEY);
 
+//WEB3 Account
+const account = web3.eth.accounts.privateKeyToAccount(process.env.WALLET_PRIVATE_KEY);
 web3.eth.accounts.wallet.add(account);
 console.log("Account address:", account.address);
 
-
+//Trade-ready
 let accountSetup = false;
 function readyToTrade() {
   accountSetup = true;
 }
 
+//Adding a Sub-account
+async function addAccount(accountName) {
+  if (!accountName) {
+    console.error("Account name is not provided.");
+    return;
+  }
+
+  try {
+    const currentGasPrice = await web3.eth.getGasPrice();
+    const increasedGasPriceBigInt = BigInt(currentGasPrice) * BigInt(120) / BigInt(100);
+    const gasEstimate = await multiAccountContract.methods.addAccount(accountName).estimateGas();
+    const gasEstimateBigInt = BigInt(gasEstimate);
+    const gasLimitWithBuffer = gasEstimateBigInt + (gasEstimateBigInt * BigInt(20) / BigInt(100));
+    console.log("Gas estimate with buffer: ", gasLimitWithBuffer.toString());
+
+    const receipt = await multiAccountContract.methods.addAccount(accountName).send({
+      from: account.address,
+      gas: gasLimitWithBuffer.toString(), 
+      gasPrice: increasedGasPriceBigInt.toString()
+    });
 
 
+    if (receipt.events.AddAccount) {
+      const event = receipt.events.AddAccount.returnValues;
+      console.log("Account Created. Address: ", event.account);
+      return event.account;
+    } else {
+      console.log("No AddAccount event found.");
+    }
+  } catch (error) {
+    console.error("Failed to add account:", error);
+  }
+}
+
+
+//Minting Collateral (for test purposes)
 async function mintCollateralTokens(amount) {
   try {
       const mintTx = collateralContract.methods.mint(process.env.WALLET_ADDRESS, amount);
@@ -61,10 +134,11 @@ async function mintCollateralTokens(amount) {
   }
 }
 
-
+// Deposit and allocate
 async function depositAndAllocateForAccount(accountAddress, amount) {
   try {
-      let nonce = await web3.eth.getTransactionCount(account.address, 'latest');
+      // Retrieve the latest nonce dynamically before sending the transaction
+      let nonce = await web3.eth.getTransactionCount(account.address, 'pending');
       
       console.log(`Approving ${amount} tokens for the multi-account contract...`);
       const approveTx = collateralContract.methods.approve(config.MULTI_ACCOUNT_ADDRESS, amount);
@@ -79,11 +153,13 @@ async function depositAndAllocateForAccount(accountAddress, amount) {
       });
 
       console.log(`Approval successful. Proceeding to deposit and allocate for account ${accountAddress}...`);
-      nonce++;
+      
+      // Retrieve the latest nonce dynamically before sending the transaction
+      nonce = await web3.eth.getTransactionCount(account.address, 'pending');
 
       const depositTx = multiAccountContract.methods.depositAndAllocateForAccount(accountAddress, amount);
       const depositGas = await depositTx.estimateGas({ from: account.address });
-      let depositGasPrice = await web3.eth.getGasPrice();
+      const depositGasPrice = await web3.eth.getGasPrice();
       const depositReceipt = await depositTx.send({
           from: account.address,
           gas: depositGas,
@@ -97,7 +173,88 @@ async function depositAndAllocateForAccount(accountAddress, amount) {
   }
 }
 
-async function getMuonSigImplementation(botAddress) {
+//Deallocate
+async function deallocateForAccount(accountAddress, amount) {
+  const deallocateClient = DeallocateClient.createInstance(true);
+
+  if (!deallocateClient) {
+    console.log('DeallocateClient is not enabled or failed to instantiate.');
+    return { success: false, error: 'DeallocateClient initialization failed' };
+  }
+
+  const account = accountAddress;
+  const appName = 'symmio';
+  const urls = [process.env.MUON_URL];
+  const chainId = 137;
+  const contractAddress = config.DIAMOND_ADDRESS;
+
+  try {
+    const signatureResult = await deallocateClient.getMuonSig(account, appName, urls, chainId, contractAddress);
+
+    if (signatureResult.success) {
+      console.log('Successfully retrieved Muon signature:', signatureResult.signature);
+
+      const { reqId, timestamp, upnl, gatewaySignature, sigs } = signatureResult.signature;
+
+      const upnlSigFormatted = {
+        reqId: web3.utils.hexToBytes(reqId),
+        timestamp: timestamp.toString(),
+        upnl: upnl.toString(),
+        gatewaySignature: web3.utils.hexToBytes(gatewaySignature),
+        sigs: {
+          signature: sigs.signature.toString(),
+          owner: sigs.owner,
+          nonce: sigs.nonce,
+        }
+      };
+
+      console.log(`Deallocating ${amount} tokens for account ${accountAddress}...`);
+
+      const deallocateParameters = [BigInt(amount), upnlSigFormatted];
+      const encodedDeallocateData = web3.eth.abi.encodeFunctionCall(deallocateFunctionAbi, deallocateParameters);
+
+      const _callData = [accountAddress, [encodedDeallocateData]];
+
+      // Estimate gas for the _call method
+      const deallocateGasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
+      console.log("Estimated Gas: ", deallocateGasEstimate);
+
+      const bufferPercentage = 0.20;
+      const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
+      const adjustedGasLimit = deallocateGasEstimate + (deallocateGasEstimate * bufferFactor / BigInt(100));
+      console.log("Adjusted Gas Limit: ", adjustedGasLimit);
+
+      const deallocateGasPrice = await web3.eth.getGasPrice();
+      console.log("Current Gas Price: ", deallocateGasPrice);
+
+      // Send the _call transaction
+      const deallocateReceipt = await multiAccountContract.methods._call(..._callData).send({
+        from: process.env.WALLET_ADDRESS,
+        gas: adjustedGasLimit.toString(),
+        gasPrice: deallocateGasPrice.toString()
+      });
+
+      console.log("Deallocate successful!", deallocateReceipt);
+      return { success: true, receipt: deallocateReceipt };
+    } else {
+      throw new Error(signatureResult.error || 'Unknown error');
+    }
+  } catch (error) {
+    console.error('Error during deallocation:', error);
+    return { success: false, error: error.toString() };
+  }
+}
+
+
+
+
+//Withdraw
+async function withdraw(accountAddress, amount) {
+
+}
+
+//Get a signature for a sendQuote
+async function getMuonSigImplementation(subAccountAddress) {
   const quotesClient = QuotesClient.createInstance(true);
 
   if (!quotesClient) {
@@ -105,7 +262,7 @@ async function getMuonSigImplementation(botAddress) {
       return { success: false, error: 'QuotesClient initialization failed' };
   }
 
-  const account = botAddress;
+  const account = subAccountAddress;
   const appName = 'symmio';
   const urls = [process.env.MUON_URL];
   const chainId = 137;
@@ -127,6 +284,7 @@ async function getMuonSigImplementation(botAddress) {
   }
 }
 
+//Helper Function to fetch the market by symbol (e.g. BTC)
 async function fetchMarketSymbolId(url, symbol) {
   if (!url) {
     throw new Error("hedgerUrl is empty");
@@ -167,6 +325,7 @@ async function fetchMarketSymbolId(url, symbol) {
   }
 }
 
+//Helper function to fetch locked params (required for a sendquote)
 async function fetchLockedParams(pair, leverage) {
   const url = `${config.HEDGER_URL}get_locked_params/${pair}?leverage=${leverage}`;
 
@@ -189,13 +348,13 @@ async function fetchLockedParams(pair, leverage) {
 
 }
 
-async function executeSendQuoteMarket(botAddress, positionType, quantity, slippage) {
-  const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, userConfig.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, userConfig.LEVERAGE);
+async function executeSendQuoteMarket(subAccountAddress, positionType, quantity, slippage) {
+  const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
+  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE);
   const autoSlippage = markets[0].autoSlippage;
   //const pricePrecision = markets[0].pricePrecision;
 
-  const signatureResult = await getMuonSigImplementation(botAddress);
+  const signatureResult = await getMuonSigImplementation(subAccountAddress);
   let adjustedPrice = BigInt(signatureResult.signature.price);
   let numericSlippage;
 
@@ -247,7 +406,6 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     const symbolId = markets[0].id;
     const orderType = 1; // MARKET order
 
-
     //QUANTITY
     const requestedQuantityWei = web3.utils.toWei(quantity.toString(), 'ether');
     console.log("requestedQuantityWei:", requestedQuantityWei);
@@ -256,16 +414,12 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     const notionalValue = new BigNumber(requestedQuantityWei).multipliedBy(new BigNumber(adjustedPriceStr));
     console.log("notionalValue:", notionalValue.toString());
   
-    
     //CVA
     const cvaWei = notionalValue
     * (new BigNumber(lockedParams.cva * 100))
     / (new BigNumber(10000)) 
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
-
-    //console.log("cvaWei: ", cvaWei);
-
 
     //LF
     const lfWei = notionalValue
@@ -274,14 +428,17 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
   
-    //console.log("lfWei: ", lfWei);
-
+    //Maintenance Margins
     const partyAmmWei = notionalValue
     * (new BigNumber(lockedParams.partyAmm * 100))
     / (new BigNumber(10000)) 
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
   
+  
+    //console.log("partyAmm: ", partyAmmWei);
+  
+    
     //console.log("partyAmm: ", partyAmmWei);
   
     const partyBmmWei = notionalValue
@@ -290,7 +447,6 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
     / (new BigNumber(lockedParams.leverage))
     / (new BigNumber(1e18));
   
-    //console.log("partyBmm: ", partyBmmWei);
   
     //Max funding and deadline
     const maxFundingRate = web3.utils.toWei('200', 'ether'); 
@@ -314,7 +470,7 @@ async function executeSendQuoteMarket(botAddress, positionType, quantity, slippa
   const encodedSendQuoteData = web3.eth.abi.encodeFunctionCall(sendQuoteFunctionAbi, sendQuoteParameters);
 
   const _callData = [
-    botAddress,
+    subAccountAddress,
     [ encodedSendQuoteData ]
   ];
 
@@ -356,10 +512,10 @@ function closeAndExit(binanceWs, error = null) {
   process.exit(0);
 }
 
-async function startPriceMonitoring(botAddress) {
+async function startPriceMonitoring(subAccountAddress) {
   let binanceWs; 
   try {
-      const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, userConfig.SYMBOL);
+      const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
       if (markets.length === 0) {
           console.error("No markets found for the specified symbol.");
           return;
@@ -373,7 +529,7 @@ async function startPriceMonitoring(botAddress) {
           console.log('Connected to Binance WebSocket');
       });
       binanceWs.on('message', (message) => {
-          handleMessage(message, botAddress, marketId, binanceWs); // Pass WebSocket instance for handling
+          handleMessage(message, subAccountAddress, marketId, binanceWs); // Pass WebSocket instance for handling
       });
   } catch (error) {
       console.error("Error setting up price monitoring:", error);
@@ -384,30 +540,30 @@ async function startPriceMonitoring(botAddress) {
 let actionTaken = false;
 let debouncer;
 
-async function handleMessage(message, botAddress, marketId, binanceWs) {
+async function handleMessage(message, subAccountAddress, marketId, binanceWs) {
     if (actionTaken) return;
 
     const data = JSON.parse(message);
     const price = parseFloat(data.data.c);
-    console.log(`Current Price of ${userConfig.SYMBOL}: `, price, "Lower:", userConfig.LOWER_THRESHOLD_PRICE, "Upper:", userConfig.UPPER_THRESHOLD_PRICE);
+    console.log(`Current Price of ${config.SYMBOL}: `, price, "Lower:", config.LOWER_THRESHOLD_PRICE, "Upper:", config.UPPER_THRESHOLD_PRICE);
 
-    if (price > userConfig.UPPER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
+    if (price > config.UPPER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
         console.log(`Price over threshold: ${price}`);
         actionTaken = true;  // Set actionTaken true immediately before the async operation
         try {
             console.log("Shorting...");
-            await executeSendQuoteMarket(botAddress, 1, userConfig.QUANTITY, "auto");
+            await executeSendQuoteMarket(subAccountAddress, 1, config.QUANTITY, "auto");
             closeAndExit(binanceWs);
         } catch (error) {
             console.error("Error during short:", error);
             closeAndExit(binanceWs);
         }
-    } else if (price < userConfig.LOWER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
+    } else if (price < config.LOWER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
         console.log(`Price under threshold: ${price}`);
         actionTaken = true;  // Set actionTaken true immediately before the async operation
         try {
             console.log("Longing...");
-            await executeSendQuoteMarket(botAddress, 0, userConfig.QUANTITY, "auto");
+            await executeSendQuoteMarket(subAccountAddress, 0, config.QUANTITY, "auto");
             console.log("Long Successful!")
             closeAndExit(binanceWs);
         } catch (error) {
@@ -416,7 +572,6 @@ async function handleMessage(message, botAddress, marketId, binanceWs) {
         }
     }
 
-    // Setup debouncer to reset actionTaken after 30 seconds
     clearTimeout(debouncer);
     debouncer = setTimeout(() => {
         actionTaken = false;
@@ -429,22 +584,18 @@ function closeAndExit(binanceWs, error) {
     console.log("WebSocket closed.");
 }
 
-function closeAndExit(binanceWs, error) {
-    if (error) console.error("Exiting due to error:", error);
-    binanceWs.close();
-    console.log("WebSocket closed.");
-}
-
 async function run() {
 try {
-    const tradingBotAddress = await addAccount(userConfig.ACCOUNT_NAME);
-    const amountToMint = web3.utils.toWei(userConfig.DEPOSIT_AMOUNT, 'ether'); 
+    const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
+    const amountToMint = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
     await mintCollateralTokens(amountToMint);
-    await depositAndAllocateForAccount(tradingBotAddress, amountToMint);
-    console.log(tradingBotAddress);
-    readyToTrade(); //Trading is now allowed...
-    console.log("Bot setup successful. ");
-    await startPriceMonitoring(tradingBotAddress);
+    await depositAndAllocateForAccount(subAccountAddress, amountToMint);
+    await deallocateForAccount(subAccountAddress, amountToMint);
+    //await withdraw
+    //console.log(subAccountAddress);
+    //readyToTrade(); //Trading is now allowed...
+    //console.log("Bot setup successful. ");
+    //await startPriceMonitoring(subAccountAddress);
   } catch (error) {
       console.error("Error in bot setup:", error);
   }

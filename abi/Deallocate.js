@@ -61,3 +61,4 @@ const deallocateFunctionAbi = {
     stateMutability: "nonpayable",
   };
   
+  module.exports = { deallocateFunctionAbi };

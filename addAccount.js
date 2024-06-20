@@ -44,4 +44,4 @@ async function addAccount(accountName) {
   }
 }
 
-module.exports = { addAccount };
+addAccount("test");
