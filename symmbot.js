@@ -1,29 +1,28 @@
 require('dotenv').config()
 
 //CONFIG
-// Define configuration
 const config = {
 
   // SYMM Config values
-  COLLATERAL_SYMBOL: "TEST",
-  COLLATERAL_DECIMALS: 18,
-  COLLATERAL_ADDRESS: "0x50E88C692B137B8a51b6017026Ef414651e0d5ba",
+  COLLATERAL_SYMBOL: "",
+  COLLATERAL_DECIMALS: 0,
+  COLLATERAL_ADDRESS: "",
 
-  DIAMOND_ADDRESS: "0x976c87Cd3eB2DE462Db249cCA711E4C89154537b",
-  MULTI_ACCOUNT_ADDRESS: "0x3adc81CC43d9e1636de9cbac764Afcb1F3ae6cde",
-  PARTY_B_WHITELIST: "0x5044238ea045585C704dC2C6387D66d29eD56648",
-  SIGNATURE_STORE_ADDRESS: "0x6B6f6A6CCdB4Df5cc462096bEAdFd609D8e281d1",
+  DIAMOND_ADDRESS: "",
+  MULTI_ACCOUNT_ADDRESS: "",
+  PARTY_B_WHITELIST: "",
+  SIGNATURE_STORE_ADDRESS: "",
 
-  MULTICALL3_ADDRESS: "0x1F98415757620B543A52E61c46B32eB19261F984",
-  USDC_ADDRESS: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-  WRAPPED_NATIVE_ADDRESS: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
-  ANALYTICS_SUBGRAPH_ADDRESS: "https://api.thegraph.com/subgraphs/name/symmiograph/symmiomain_polygon_8_2",
-  ORDER_HISTORY_SUBGRAPH_ADDRESS: "https://api.thegraph.com/subgraphs/name/symmiograph/symmiomain_polygon_8_2",
-  HEDGER_URL: 'https://alpha-hedger.rasa.capital/',
+  MULTICALL3_ADDRESS: "",
+  USDC_ADDRESS: "",
+  WRAPPED_NATIVE_ADDRESS: "",
+  ANALYTICS_SUBGRAPH_ADDRESS: "",
+  ORDER_HISTORY_SUBGRAPH_ADDRESS: "",
+  HEDGER_URL: '',
 
 // User Config values
-ACCOUNT_NAME: "TEST",
-DEPOSIT_AMOUNT: 200, // Amount of Tokens
+ACCOUNT_NAME: "",
+DEPOSIT_AMOUNT: 0, // Amount of Tokens
 LOWER_THRESHOLD_PRICE: 0, // Lower Price (float)
 UPPER_THRESHOLD_PRICE: 0, // Upper Price (float)
 SYMBOL: '', // 'ETH'
@@ -134,47 +133,57 @@ async function mintCollateralTokens(amount) {
   }
 }
 
+async function getLatestNonce() {
+  return await web3.eth.getTransactionCount(process.env.WALLET_ADDRESS, 'latest');
+}
+
 // Deposit and allocate
 async function depositAndAllocateForAccount(accountAddress, amount) {
   try {
-      // Retrieve the latest nonce dynamically before sending the transaction
-      let nonce = await web3.eth.getTransactionCount(account.address, 'pending');
-      
+      let txNonce = await getLatestNonce();
+
       console.log(`Approving ${amount} tokens for the multi-account contract...`);
       const approveTx = collateralContract.methods.approve(config.MULTI_ACCOUNT_ADDRESS, amount);
-      const approveGas = await approveTx.estimateGas({ from: account.address });
-      const approveGasPrice = await web3.eth.getGasPrice(); 
+      const approveGas = await approveTx.estimateGas({ from: process.env.WALLET_ADDRESS });
+      const approveGasPrice = await web3.eth.getGasPrice();
+
+      const bufferPercentage = 1;
+      const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
+      const adjustedApproveGasLimit = approveGas + (approveGas * bufferFactor / BigInt(100));
 
       await approveTx.send({
-          from: account.address,
-          gas: approveGas,
+          from: process.env.WALLET_ADDRESS,
+          gas: adjustedApproveGasLimit.toString(),
           gasPrice: approveGasPrice,
-          nonce: nonce
+          nonce: txNonce
       });
 
-      console.log(`Approval successful. Proceeding to deposit and allocate for account ${accountAddress}...`);
-      
-      // Retrieve the latest nonce dynamically before sending the transaction
-      nonce = await web3.eth.getTransactionCount(account.address, 'pending');
+      console.log(`Approval successful. Depositing for Account: ${accountAddress}...`);
 
-      const depositTx = multiAccountContract.methods.depositAndAllocateForAccount(accountAddress, amount);
-      const depositGas = await depositTx.estimateGas({ from: account.address });
-      const depositGasPrice = await web3.eth.getGasPrice();
-      const depositReceipt = await depositTx.send({
-          from: account.address,
-          gas: depositGas,
-          gasPrice: depositGasPrice,
-          nonce: nonce 
-      });
+      let txNonceDeposit = await getLatestNonce();
 
-      console.log("Deposit and allocation successful!");
+    const depositTx = multiAccountContract.methods.depositAndAllocateForAccount(accountAddress, amount);
+    const depositGas = await depositTx.estimateGas({ from: process.env.WALLET_ADDRESS });
+    const depositGasPrice = await web3.eth.getGasPrice();
+
+    const adjustedDepositGasLimit = depositGas + (depositGas * bufferFactor / BigInt(100));
+
+    const depositReceipt = await depositTx.send({
+      from: process.env.WALLET_ADDRESS,
+      gas: adjustedDepositGasLimit.toString(),
+      gasPrice: depositGasPrice,
+      nonce: txNonceDeposit
+    });
+
+    console.log("Deposit and allocation successful!");
   } catch (error) {
-      console.error("An error occurred during the deposit and allocation process:", error);
+    console.error("An error occurred during the deposit and allocation process:", error);
   }
 }
 
 //Deallocate
 async function deallocateForAccount(accountAddress, amount) {
+  console.log("Deallocating...");
   const deallocateClient = DeallocateClient.createInstance(true);
 
   if (!deallocateClient) {
@@ -192,8 +201,6 @@ async function deallocateForAccount(accountAddress, amount) {
     const signatureResult = await deallocateClient.getMuonSig(account, appName, urls, chainId, contractAddress);
 
     if (signatureResult.success) {
-      console.log('Successfully retrieved Muon signature:', signatureResult.signature);
-
       const { reqId, timestamp, upnl, gatewaySignature, sigs } = signatureResult.signature;
 
       const upnlSigFormatted = {
@@ -219,7 +226,7 @@ async function deallocateForAccount(accountAddress, amount) {
       const deallocateGasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
       console.log("Estimated Gas: ", deallocateGasEstimate);
 
-      const bufferPercentage = 0.20;
+      const bufferPercentage = 0.50;
       const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
       const adjustedGasLimit = deallocateGasEstimate + (deallocateGasEstimate * bufferFactor / BigInt(100));
       console.log("Adjusted Gas Limit: ", adjustedGasLimit);
@@ -227,14 +234,13 @@ async function deallocateForAccount(accountAddress, amount) {
       const deallocateGasPrice = await web3.eth.getGasPrice();
       console.log("Current Gas Price: ", deallocateGasPrice);
 
-      // Send the _call transaction
       const deallocateReceipt = await multiAccountContract.methods._call(..._callData).send({
         from: process.env.WALLET_ADDRESS,
         gas: adjustedGasLimit.toString(),
         gasPrice: deallocateGasPrice.toString()
       });
 
-      console.log("Deallocate successful!", deallocateReceipt);
+      console.log("Deallocate successful!");
       return { success: true, receipt: deallocateReceipt };
     } else {
       throw new Error(signatureResult.error || 'Unknown error');
@@ -245,13 +251,42 @@ async function deallocateForAccount(accountAddress, amount) {
   }
 }
 
+async function withdrawFromAccount(accountAddress, amount) {
+  try {
+    console.log(`Withdrawing ${amount} tokens from account ${accountAddress}...`);
 
+    // Retrieve the latest nonce dynamically before sending the transaction
+    let txNonce = await getLatestNonce();
 
+    // Estimate gas for the withdrawFromAccount method
+    const withdrawTx = multiAccountContract.methods.withdrawFromAccount(accountAddress, amount);
+    const withdrawGasEstimate = await withdrawTx.estimateGas({ from: process.env.WALLET_ADDRESS });
+    console.log("Estimated Gas: ", withdrawGasEstimate);
 
-//Withdraw
-async function withdraw(accountAddress, amount) {
+    const bufferPercentage = 0.20;
+    const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
+    const adjustedGasLimit = withdrawGasEstimate + (withdrawGasEstimate * bufferFactor / BigInt(100));
+    console.log("Adjusted Gas Limit: ", adjustedGasLimit);
 
+    const withdrawGasPrice = await web3.eth.getGasPrice();
+    console.log("Current Gas Price: ", withdrawGasPrice);
+
+    // Send the withdrawFromAccount transaction
+    const withdrawReceipt = await withdrawTx.send({
+      from: account.address,
+      gas: adjustedGasLimit.toString(),
+      gasPrice: withdrawGasPrice.toString(),
+      nonce: txNonce
+    });
+
+    console.log("Withdraw successful!", withdrawReceipt);
+    return { success: true, receipt: withdrawReceipt };
+  } catch (error) {
+    console.error('Error during withdrawal:', error);
+    return { success: false, error: error.toString() };
+  }
 }
+
 
 //Get a signature for a sendQuote
 async function getMuonSigImplementation(subAccountAddress) {
@@ -591,14 +626,14 @@ try {
     await mintCollateralTokens(amountToMint);
     await depositAndAllocateForAccount(subAccountAddress, amountToMint);
     await deallocateForAccount(subAccountAddress, amountToMint);
-    //await withdraw
-    //console.log(subAccountAddress);
-    //readyToTrade(); //Trading is now allowed...
-    //console.log("Bot setup successful. ");
-    //await startPriceMonitoring(subAccountAddress);
+    await withdrawFromAccount('0xFD2a852A6D5aA733a64F3a10Ba163cF8CCd3D6F7', amountToMint);
+    console.log(subAccountAddress);
+    readyToTrade(); //Trading is now allowed...
+    console.log("Bot setup successful. ");
+    await startPriceMonitoring(subAccountAddress);
   } catch (error) {
       console.error("Error in bot setup:", error);
   }
 }
 
-run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
+run();

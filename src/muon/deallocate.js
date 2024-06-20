@@ -50,7 +50,7 @@ class DeallocateClient extends MuonClient {
           gatewaySignature,
           sigs: { signature, owner, nonce },
         };
-        console.log("Generated Signature: ", generatedSignature);
+        //console.log("Generated Signature: ", generatedSignature);
         return { success: true, signature: generatedSignature };
       } else {
         throw new Error("Muon request unsuccessful");

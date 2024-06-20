@@ -1,6 +1,37 @@
 require('dotenv').config();
 const { Web3 } = require('web3');
-const config = require('./symmconfig');
+
+//CONFIG
+const config = {
+
+  // SYMM Config values
+  COLLATERAL_SYMBOL: "",
+  COLLATERAL_DECIMALS: 0,
+  COLLATERAL_ADDRESS: "",
+
+  DIAMOND_ADDRESS: "",
+  MULTI_ACCOUNT_ADDRESS: "",
+  PARTY_B_WHITELIST: "",
+  SIGNATURE_STORE_ADDRESS: "",
+
+  MULTICALL3_ADDRESS: "",
+  USDC_ADDRESS: "",
+  WRAPPED_NATIVE_ADDRESS: "",
+  ANALYTICS_SUBGRAPH_ADDRESS: "",
+  ORDER_HISTORY_SUBGRAPH_ADDRESS: "",
+  HEDGER_URL: '',
+
+// User Config values
+ACCOUNT_NAME: "",
+DEPOSIT_AMOUNT: 0, // Amount of Tokens
+LOWER_THRESHOLD_PRICE: 0, // Lower Price (float)
+UPPER_THRESHOLD_PRICE: 0, // Upper Price (float)
+SYMBOL: '', // 'ETH'
+QUANTITY: 0, // Units of Requested Quantity
+LEVERAGE: 0, // Leverage
+ORDERTYPE: 0//
+}
+
 const { multiAccountABI } = require('./abi/MultiAccount');
 const multiAccountAddress = config.MULTI_ACCOUNT_ADDRESS;
 const web3 = new Web3(new Web3.providers.HttpProvider(process.env.PROVIDER_URL));
