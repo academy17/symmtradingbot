@@ -31,7 +31,6 @@ LEVERAGE: 0, // Leverage
 ORDERTYPE: 0//
 }
 
-
 const { Web3 } = require('web3');
 const WebSocket = require('ws');
 const { toWei, toWeiBN } = require('./src/utils/numbers');
@@ -100,7 +99,6 @@ async function addAccount(accountName) {
   }
 }
 
-
 //Minting Collateral (for test purposes)
 async function mintCollateralTokens(amount) {
   try {
@@ -132,11 +130,10 @@ async function mintCollateralTokens(amount) {
       console.error("Error minting tokens: ", error);
   }
 }
-
+//Helper function for retrieving the latest nonce
 async function getLatestNonce() {
   return await web3.eth.getTransactionCount(process.env.WALLET_ADDRESS, 'latest');
 }
-
 // Deposit and allocate
 async function depositAndAllocateForAccount(accountAddress, amount) {
   try {
@@ -180,7 +177,6 @@ async function depositAndAllocateForAccount(accountAddress, amount) {
     console.error("An error occurred during the deposit and allocation process:", error);
   }
 }
-
 //Deallocate
 async function deallocateForAccount(accountAddress, amount) {
   console.log("Deallocating...");
@@ -255,10 +251,8 @@ async function withdrawFromAccount(accountAddress, amount) {
   try {
     console.log(`Withdrawing ${amount} tokens from account ${accountAddress}...`);
 
-    // Retrieve the latest nonce dynamically before sending the transaction
     let txNonce = await getLatestNonce();
 
-    // Estimate gas for the withdrawFromAccount method
     const withdrawTx = multiAccountContract.methods.withdrawFromAccount(accountAddress, amount);
     const withdrawGasEstimate = await withdrawTx.estimateGas({ from: process.env.WALLET_ADDRESS });
     console.log("Estimated Gas: ", withdrawGasEstimate);
@@ -266,12 +260,10 @@ async function withdrawFromAccount(accountAddress, amount) {
     const bufferPercentage = 0.20;
     const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
     const adjustedGasLimit = withdrawGasEstimate + (withdrawGasEstimate * bufferFactor / BigInt(100));
-    console.log("Adjusted Gas Limit: ", adjustedGasLimit);
 
     const withdrawGasPrice = await web3.eth.getGasPrice();
     console.log("Current Gas Price: ", withdrawGasPrice);
 
-    // Send the withdrawFromAccount transaction
     const withdrawReceipt = await withdrawTx.send({
       from: account.address,
       gas: adjustedGasLimit.toString(),
@@ -279,7 +271,7 @@ async function withdrawFromAccount(accountAddress, amount) {
       nonce: txNonce
     });
 
-    console.log("Withdraw successful!", withdrawReceipt);
+    console.log("Withdraw successful!");
     return { success: true, receipt: withdrawReceipt };
   } catch (error) {
     console.error('Error during withdrawal:', error);
@@ -620,7 +612,7 @@ function closeAndExit(binanceWs, error) {
 }
 
 async function run() {
-try {
+  try {
     const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
     const amountToMint = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
     await mintCollateralTokens(amountToMint);
@@ -632,7 +624,7 @@ try {
     console.log("Bot setup successful. ");
     await startPriceMonitoring(subAccountAddress);
   } catch (error) {
-      console.error("Error in bot setup:", error);
+    console.error("Error in bot setup:", error);
   }
 }
 
