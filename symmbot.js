@@ -1,35 +1,6 @@
+//CONFIGS
 require('dotenv').config()
-
-//CONFIG
-const config = {
-
-  // SYMM Config values
-  COLLATERAL_SYMBOL: "",
-  COLLATERAL_DECIMALS: 0,
-  COLLATERAL_ADDRESS: "",
-
-  DIAMOND_ADDRESS: "",
-  MULTI_ACCOUNT_ADDRESS: "",
-  PARTY_B_WHITELIST: "",
-  SIGNATURE_STORE_ADDRESS: "",
-
-  MULTICALL3_ADDRESS: "",
-  USDC_ADDRESS: "",
-  WRAPPED_NATIVE_ADDRESS: "",
-  ANALYTICS_SUBGRAPH_ADDRESS: "",
-  ORDER_HISTORY_SUBGRAPH_ADDRESS: "",
-  HEDGER_URL: '',
-
-// User Config values
-ACCOUNT_NAME: "",
-DEPOSIT_AMOUNT: 0, // Amount of Tokens
-LOWER_THRESHOLD_PRICE: 0, // Lower Price (float)
-UPPER_THRESHOLD_PRICE: 0, // Upper Price (float)
-SYMBOL: '', // 'ETH'
-QUANTITY: 0, // Units of Requested Quantity
-LEVERAGE: 0, // Leverage
-ORDERTYPE: 0//
-}
+const config = require('./config');
 
 const { Web3 } = require('web3');
 const WebSocket = require('ws');
@@ -74,7 +45,7 @@ async function addAccount(accountName) {
 
   try {
     const currentGasPrice = await web3.eth.getGasPrice();
-    const increasedGasPriceBigInt = BigInt(currentGasPrice) * BigInt(120) / BigInt(100);
+    const increasedGasPriceBigInt = BigInt(currentGasPrice) * BigInt(120)
     const gasEstimate = await multiAccountContract.methods.addAccount(accountName).estimateGas();
     const gasEstimateBigInt = BigInt(gasEstimate);
     const gasLimitWithBuffer = gasEstimateBigInt + (gasEstimateBigInt * BigInt(20) / BigInt(100));
@@ -605,12 +576,8 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs) {
     }, 30000);
 }
 
-function closeAndExit(binanceWs, error) {
-    if (error) console.error("Exiting due to error:", error);
-    binanceWs.close();
-    console.log("WebSocket closed.");
-}
 
+/*
 async function run() {
   try {
     const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
@@ -629,3 +596,4 @@ async function run() {
 }
 
 run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
+*/
