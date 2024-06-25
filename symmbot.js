@@ -71,7 +71,7 @@ async function addAccount(accountName) {
 }
 
 //Minting Collateral (for test purposes)
-async function mintCollateralTokens(amount) {
+async function mintCollateralTokens(amount, collateralAddress) {
   try {
       const mintTx = collateralContract.methods.mint(process.env.WALLET_ADDRESS, amount);
       let gas = await mintTx.estimateGas({from: account.address});
@@ -87,7 +87,7 @@ async function mintCollateralTokens(amount) {
 
       const tx = {
           from: account.address,
-          to: config.COLLATERAL_ADDRESS,
+          to: collateralAddress,
           gas: gasWithBuffer.toString(), 
           gasPrice: increasedGasPrice.toString(), 
           data,
@@ -106,12 +106,12 @@ async function getLatestNonce() {
   return await web3.eth.getTransactionCount(process.env.WALLET_ADDRESS, 'latest');
 }
 // Deposit and allocate
-async function depositAndAllocateForAccount(accountAddress, amount) {
+async function depositAndAllocateForAccount(accountAddress, amount, multiAccountAddress) {
   try {
       let txNonce = await getLatestNonce();
 
       console.log(`Approving ${amount} tokens for the multi-account contract...`);
-      const approveTx = collateralContract.methods.approve(config.MULTI_ACCOUNT_ADDRESS, amount);
+      const approveTx = collateralContract.methods.approve(multiAccountAddress, amount);
       const approveGas = await approveTx.estimateGas({ from: process.env.WALLET_ADDRESS });
       const approveGasPrice = await web3.eth.getGasPrice();
 
@@ -149,7 +149,7 @@ async function depositAndAllocateForAccount(accountAddress, amount) {
   }
 }
 //Deallocate
-async function deallocateForAccount(accountAddress, amount) {
+async function deallocateForAccount(accountAddress, amount, diamondAddress) {
   console.log("Deallocating...");
   const deallocateClient = DeallocateClient.createInstance(true);
 
@@ -162,7 +162,7 @@ async function deallocateForAccount(accountAddress, amount) {
   const appName = 'symmio';
   const urls = [process.env.MUON_URL];
   const chainId = 137;
-  const contractAddress = config.DIAMOND_ADDRESS;
+  const contractAddress = diamondAddress;
 
   try {
     const signatureResult = await deallocateClient.getMuonSig(account, appName, urls, chainId, contractAddress);
@@ -217,7 +217,7 @@ async function deallocateForAccount(accountAddress, amount) {
     return { success: false, error: error.toString() };
   }
 }
-
+//Withdraw
 async function withdrawFromAccount(accountAddress, amount) {
   try {
     console.log(`Withdrawing ${amount} tokens from account ${accountAddress}...`);
@@ -252,7 +252,7 @@ async function withdrawFromAccount(accountAddress, amount) {
 
 
 //Get a signature for a sendQuote
-async function getMuonSigImplementation(subAccountAddress) {
+async function getMuonSigImplementation(subAccountAddress, diamondAddress) {
   const quotesClient = QuotesClient.createInstance(true);
 
   if (!quotesClient) {
@@ -264,7 +264,7 @@ async function getMuonSigImplementation(subAccountAddress) {
   const appName = 'symmio';
   const urls = [process.env.MUON_URL];
   const chainId = 137;
-  const contractAddress = config.DIAMOND_ADDRESS;
+  const contractAddress = diamondAddress;
   const marketId = 4;
 
   try {
@@ -324,8 +324,8 @@ async function fetchMarketSymbolId(url, symbol) {
 }
 
 //Helper function to fetch locked params (required for a sendquote)
-async function fetchLockedParams(pair, leverage) {
-  const url = `${config.HEDGER_URL}get_locked_params/${pair}?leverage=${leverage}`;
+async function fetchLockedParams(pair, leverage, hedgerUrl) {
+  const url = `${hedgerUrl}get_locked_params/${pair}?leverage=${leverage}`;
 
   try {
     const response = await axios.get(url);
@@ -346,13 +346,13 @@ async function fetchLockedParams(pair, leverage) {
 
 }
 
-async function executeSendQuoteMarket(subAccountAddress, positionType, quantity, slippage) {
+async function executeSendQuoteMarket(subAccountAddress, positionType, quantity, slippage, diamondAddress, partyBWhitelist) {
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE);
+  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
   const autoSlippage = markets[0].autoSlippage;
   //const pricePrecision = markets[0].pricePrecision;
 
-  const signatureResult = await getMuonSigImplementation(subAccountAddress);
+  const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress);
   let adjustedPrice = BigInt(signatureResult.signature.price);
   let numericSlippage;
 
@@ -400,7 +400,7 @@ async function executeSendQuoteMarket(subAccountAddress, positionType, quantity,
         }
     };
 
-    const partyBsWhiteList = [config.PARTY_B_WHITELIST];
+    const partyBsWhiteList = [partyBWhitelist];
     const symbolId = markets[0].id;
     const orderType = 1; // MARKET order
 
@@ -487,8 +487,16 @@ async function executeSendQuoteMarket(subAccountAddress, positionType, quantity,
         gas: adjustedGasLimit.toString(), 
         gasPrice: sendQuotePrice.toString() 
       });
+
+      if (receipt.events.SendQuote) {
+        const event = receipt.events.AddAccount.returnValues;
+        console.log("SendQuote ID: ", event.quoteId);
+        return event.quoteId;
+      } else {
+        console.log("No AddAccount event found.");
+      }
       
-  //console.log('Transaction receipt:', sendQuoteReceipt);
+  console.log('Transaction receipt:', sendQuoteReceipt);
 
     } catch (error) {
         console.error('Error sending quote:', error);
@@ -527,7 +535,7 @@ async function startPriceMonitoring(subAccountAddress) {
           console.log('Connected to Binance WebSocket');
       });
       binanceWs.on('message', (message) => {
-          handleMessage(message, subAccountAddress, marketId, binanceWs); // Pass WebSocket instance for handling
+          handleMessage(message, subAccountAddress, marketId, binanceWs, config.LOWER_THRESHOLD_PRICE, config.UPPER_THRESHOLD_PRICE); // Pass WebSocket instance for handling
       });
   } catch (error) {
       console.error("Error setting up price monitoring:", error);
@@ -538,31 +546,32 @@ async function startPriceMonitoring(subAccountAddress) {
 let actionTaken = false;
 let debouncer;
 
-async function handleMessage(message, subAccountAddress, marketId, binanceWs) {
+async function handleMessage(message, subAccountAddress, marketId, binanceWs, lowerThresholdPrice, upperThresholdPrice) {
     if (actionTaken) return;
 
     const data = JSON.parse(message);
     const price = parseFloat(data.data.c);
     console.log(`Current Price of ${config.SYMBOL}: `, price, "Lower:", config.LOWER_THRESHOLD_PRICE, "Upper:", config.UPPER_THRESHOLD_PRICE);
 
-    if (price > config.UPPER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
+    if (price > upperThresholdPrice && accountSetup && !actionTaken) {
         console.log(`Price over threshold: ${price}`);
         actionTaken = true;  // Set actionTaken true immediately before the async operation
         try {
             console.log("Shorting...");
-            await executeSendQuoteMarket(subAccountAddress, 1, config.QUANTITY, "auto");
+            const quoteId = await executeSendQuoteMarket(subAccountAddress, 1, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
+            console.log("Short Successful! Quote Id: ", quoteId);
             closeAndExit(binanceWs);
         } catch (error) {
             console.error("Error during short:", error);
             closeAndExit(binanceWs);
         }
-    } else if (price < config.LOWER_THRESHOLD_PRICE && accountSetup && !actionTaken) {
+    } else if (price < lowerThresholdPrice && accountSetup && !actionTaken) {
         console.log(`Price under threshold: ${price}`);
         actionTaken = true;  // Set actionTaken true immediately before the async operation
         try {
             console.log("Longing...");
-            await executeSendQuoteMarket(subAccountAddress, 0, config.QUANTITY, "auto");
-            console.log("Long Successful!")
+            const quoteId = await executeSendQuoteMarket(subAccountAddress, 0, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
+            console.log("Long Successful! Quote Id: ", quoteId);
             closeAndExit(binanceWs);
         } catch (error) {
             console.error("Error during long:", error);
@@ -577,23 +586,22 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs) {
 }
 
 
-/*
 async function run() {
   try {
     const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
-    const amountToMint = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
-    await mintCollateralTokens(amountToMint);
-    await depositAndAllocateForAccount(subAccountAddress, amountToMint);
-    //await deallocateForAccount(subAccountAddress, amountToMint);
-    //await withdrawFromAccount(subAccountAddress, amountToMint);
+    //const depositAmountWei = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
+    //await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
+    //await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
+    //await deallocateForAccount(subAccountAddress, depositAmountWei. config.DIAMOND_ADDRESS);
+    //await withdrawFromAccount(subAccountAddress, depositAmountWei);
     console.log(subAccountAddress);
-    readyToTrade(); //Trading is now allowed...
-    console.log("Bot setup successful. ");
-    await startPriceMonitoring(subAccountAddress);
+    //readyToTrade(); //Trading is now allowed...
+    //console.log("Bot setup successful. ");
+    //await startPriceMonitoring(subAccountAddress);
   } catch (error) {
     console.error("Error in bot setup:", error);
   }
 }
 
-run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
-*/
+run();
+//.then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
