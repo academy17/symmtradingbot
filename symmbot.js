@@ -14,6 +14,7 @@ const collateralABI = require('./abi/FakeStableCoinABI');
 const { multiAccountABI } = require('./abi/MultiAccount');
 const { sendQuoteFunctionAbi, _callAbi } = require('./abi/SendQuote');
 const { deallocateFunctionAbi} = require('./abi/Deallocate');
+const { requestToCloseAbi } = require('./abi/requestToClosePositionFunctionAbi');
 
 //MUON
 const QuotesClient = require('./src/muon/quotes');
@@ -345,7 +346,8 @@ async function fetchLockedParams(pair, leverage, hedgerUrl) {
 
 }
 
-async function executeSendQuoteMarket(subAccountAddress, positionType, quantity, slippage, diamondAddress, partyBWhitelist) {
+
+async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
   const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
   const autoSlippage = markets[0].autoSlippage;
@@ -401,7 +403,6 @@ async function executeSendQuoteMarket(subAccountAddress, positionType, quantity,
 
     const partyBsWhiteList = [partyBWhitelist];
     const symbolId = markets[0].id;
-    const orderType = 1; // MARKET order
 
     //QUANTITY
     const requestedQuantityWei = web3.utils.toWei(quantity.toString(), 'ether');
@@ -515,6 +516,208 @@ async function executeSendQuoteMarket(subAccountAddress, positionType, quantity,
   }
 }
 
+//TODO Testing
+async function executeSendQuoteZeroMM(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
+  const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
+  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
+  const autoSlippage = markets[0].autoSlippage;
+  //const pricePrecision = markets[0].pricePrecision;
+
+  const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress);
+  let adjustedPrice = BigInt(signatureResult.signature.price);
+  let numericSlippage;
+
+  if (signatureResult.success) {
+    if (slippage === "auto") {
+      const autoSlippageNumerator = BigInt(Math.floor(autoSlippage * 1000));
+      const autoSlippageDenominator = BigInt(1000); 
+      adjustedPrice = positionType === 1
+        ? (adjustedPrice * autoSlippageDenominator) / autoSlippageNumerator
+        : (adjustedPrice * autoSlippageNumerator) / autoSlippageDenominator;
+    } else {
+      numericSlippage = Number(slippage); 
+      if (isNaN(numericSlippage)) {
+        console.error("Slippage must be a number or 'auto'");
+        return;
+      }
+      const spSigned = positionType === 1 ? numericSlippage : -numericSlippage;
+      const slippageFactored = (100 - spSigned) / 100;
+      const slippageFactorBigInt = BigInt(Math.floor(slippageFactored * 100));
+      adjustedPrice = (adjustedPrice * slippageFactorBigInt) / BigInt(100);
+    }
+  
+    const requestedPrice = adjustedPrice;
+
+    const { reqId, timestamp, upnl, price, gatewaySignature, sigs } = signatureResult.signature;
+    console.log("Price of asset: ", price);
+    if (typeof reqId === 'undefined' || !reqId.startsWith('0x')) {
+      console.error("reqId is undefined or not a hex string:", reqId);
+    }
+    if (typeof gatewaySignature === 'undefined' || !gatewaySignature.startsWith('0x')) {
+      console.error("gatewaySignature is undefined or not a hex string:", gatewaySignature);
+    }
+
+
+    const upnlSigFormatted = {
+        reqId: web3.utils.hexToBytes(reqId),
+        timestamp: timestamp.toString(),
+        upnl: upnl.toString(),
+        price: price.toString(),
+        gatewaySignature: web3.utils.hexToBytes(gatewaySignature),
+        sigs: {
+            signature: sigs.signature.toString(),
+            owner: sigs.owner,
+            nonce: sigs.nonce,
+        }
+    };
+
+    const partyBsWhiteList = [partyBWhitelist];
+    const symbolId = markets[0].id;
+
+    //QUANTITY
+    const requestedQuantityWei = web3.utils.toWei(quantity.toString(), 'ether');
+    console.log("requestedQuantityWei:", requestedQuantityWei);
+    const adjustedPriceStr = adjustedPrice.toString();
+
+    const notionalValue = new BigNumber(requestedQuantityWei).multipliedBy(new BigNumber(adjustedPriceStr));
+    console.log("notionalValue:", notionalValue.toString());
+  
+    //CVA
+    const cvaWei = notionalValue
+    * (new BigNumber(lockedParams.cva * 100))
+    / (new BigNumber(10000)) 
+    / (new BigNumber(lockedParams.leverage))
+    / (new BigNumber(1e18));
+
+    //LF
+    const lfWei = notionalValue
+    * (new BigNumber(lockedParams.lf * 100))
+    / (new BigNumber(10000)) 
+    / (new BigNumber(lockedParams.leverage))
+    / (new BigNumber(1e18));
+  
+    //Maintenance Margins
+    const partyAmmWei = notionalValue
+    * (new BigNumber(0))
+
+    
+    const partyBmmWei = notionalValue
+    * (new BigNumber(lockedParams.partyBmm * 100))
+    / (new BigNumber(10000)) 
+    / (new BigNumber(lockedParams.leverage))
+    / (new BigNumber(1e18));
+  
+  
+    //Max funding and deadline
+    const maxFundingRate = web3.utils.toWei('200', 'ether'); 
+    const deadline = (Math.floor(Date.now() / 1000) + 120).toString();
+    const sendQuoteParameters = [
+      partyBsWhiteList,
+      symbolId,
+      positionType,
+      orderType,
+      requestedPrice.toString(), 
+      requestedQuantityWei.toString(),
+      cvaWei.toString(), 
+      lfWei.toString(),
+      partyAmmWei.toString(),
+      partyBmmWei.toString(), 
+      maxFundingRate.toString(), 
+      deadline.toString(),
+      upnlSigFormatted
+  ];
+
+  const encodedSendQuoteData = web3.eth.abi.encodeFunctionCall(sendQuoteFunctionAbi, sendQuoteParameters);
+
+  const _callData = [
+    subAccountAddress,
+    [ encodedSendQuoteData ]
+  ];
+
+  const calldataEncoded = web3.eth.abi.encodeFunctionCall(_callAbi, _callData);
+  console.log("callDataEncoded: ", calldataEncoded);
+  console.log("Calldata: ", _callData);
+
+    try {
+      const bufferPercentage = 0.20;
+      const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
+      const sendQuoteGasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
+      console.log("Estimated Gas: ", sendQuoteGasEstimate);
+            const adjustedGasLimit = sendQuoteGasEstimate + (sendQuoteGasEstimate * bufferFactor / BigInt(100));
+      console.log("Adjusted Gas Limit: ", adjustedGasLimit);
+      const sendQuotePrice = await web3.eth.getGasPrice();
+      console.log("Current Gas Price: ", sendQuotePrice);
+            const sendQuoteReceipt = await multiAccountContract.methods._call(..._callData).send({
+        from: account.address,
+        gas: adjustedGasLimit.toString(), 
+        gasPrice: sendQuotePrice.toString() 
+      });
+
+    const sendQuoteContractAddress = diamondAddress.toLowerCase();
+    const sendQuoteEventSignatureHash = '0x8a17f103c77224ce4d9bab74dad3bd002cd24cf88d2e191e86d18272c8f135dd';
+
+    const sendQuoteLogs = sendQuoteReceipt.logs.filter(log => 
+        log.address.toLowerCase() === sendQuoteContractAddress &&
+        log.topics[0] === sendQuoteEventSignatureHash
+    );
+
+    if (sendQuoteLogs.length > 0) {
+        sendQuoteLogs.forEach(log => {
+            const decodedData = web3.eth.abi.decodeParameters(['address', 'uint256', 'address[]', 'uint256', 'uint8', 'uint8', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'], log.data);
+            console.log("SendQuote ID: ", decodedData[1]); // Assuming quoteId is the second parameter
+        });
+    } else {
+        console.log("No SendQuote event found.");
+    }
+} catch (error) {
+    console.error('Error sending quote:', error);
+}
+
+  } else {
+    console.error('Failed to obtain signature:', signatureResult.error);
+  }
+}
+
+//TODO Testing
+async function closePosition(accountAddress, quoteId, closePrice, quantityToClose, orderType, deadline) {
+  console.log("Requesting to close position...");
+  
+  const nowInSeconds = Math.floor(Date.now() / 1000);
+  const deadlineInSeconds = nowInSeconds + deadline;
+  
+  try {
+      const closePositionParameters = [quoteId, closePrice, quantityToClose, orderType, deadlineInSeconds];
+      const encodedClosePositionData = web3.eth.abi.encodeFunctionCall(requestToClosePositionFunctionAbi, closePositionParameters);
+      
+      const _callData = [accountAddress, [encodedClosePositionData]];
+
+      // Estimate gas for the _call method
+      const gasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
+      console.log("Estimated Gas: ", gasEstimate);
+
+      const bufferPercentage = 0.20; // Smaller buffer as transaction might be less complex
+      const bufferFactor = Math.floor(bufferPercentage * 100);
+      const adjustedGasLimit = gasEstimate + (gasEstimate * bufferFactor / 100);
+      console.log("Adjusted Gas Limit: ", adjustedGasLimit);
+
+      const gasPrice = await web3.eth.getGasPrice();
+      console.log("Current Gas Price: ", gasPrice);
+
+      // Sending the transaction
+      const transactionReceipt = await multiAccountContract.methods._call(..._callData).send({
+          from: process.env.WALLET_ADDRESS,
+          gas: adjustedGasLimit.toString(),
+          gasPrice: gasPrice.toString()
+      });
+
+      console.log("Position close request successful!");
+      return { success: true, receipt: transactionReceipt };
+  } catch (error) {
+      console.error('Error during position close request:', error);
+      return { success: false, error: error.toString() };
+  }
+}
+
 function closeAndExit(binanceWs, error = null) {
   if (error) {
       console.error("Failed to execute quote:", error);
@@ -567,7 +770,7 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
         actionTaken = true;  // Set actionTaken true immediately before the async operation
         try {
             console.log("Shorting...");
-            const quoteId = await executeSendQuoteMarket(subAccountAddress, 1, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
+            const quoteId = await executeSendQuoteMarket(subAccountAddress, 1, config.ORDERTYPE, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
             console.log("Short Successful! Quote Id: ", quoteId);
             closeAndExit(binanceWs);
         } catch (error) {
@@ -579,7 +782,7 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
         actionTaken = true;  // Set actionTaken true immediately before the async operation
         try {
             console.log("Longing...");
-            const quoteId = await executeSendQuoteMarket(subAccountAddress, 0, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
+            const quoteId = await executeSendQuoteMarket(subAccountAddress, 0, config.ORDERTYPE, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
             console.log("Long Successful! Quote Id: ", quoteId);
             closeAndExit(binanceWs);
         } catch (error) {
@@ -603,6 +806,10 @@ async function run() {
     //await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
     //await deallocateForAccount(subAccountAddress, depositAmountWei. config.DIAMOND_ADDRESS);
     //await withdrawFromAccount(subAccountAddress, depositAmountWei);
+
+    //TODO
+    await executeSendQuoteMinimalCollateral();
+    await closePosition();
     //console.log(subAccountAddress);
     readyToTrade(); //Trading is now allowed...
     console.log("Bot setup successful. ");
