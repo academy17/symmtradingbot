@@ -1,4 +1,4 @@
-const { MuonClient } = require("./base"); 
+const { MuonClient } = require("./base"); // Adjust the path as necessary
 const viem = require("viem");
 
 class QuotesClient extends MuonClient {
@@ -44,8 +44,10 @@ class QuotesClient extends MuonClient {
         console.log("timestamp: ", timestamp);
         const upnl = result.result.data.result.uPnl ? BigInt(result.result.data.result.uPnl) : BigInt(0);
         const price = result.result.data.result.price ? BigInt(result.result.data.result.price) : BigInt(0);
+        
         const gatewaySignature = result.result.nodeSignature;
-        const signature = result.result.signatures[0].signature;
+
+        const signature = result.result.signatures[0].signature ? BigInt(result.result.signatures[0].signature) : BigInt(0);
         const owner = result.result.signatures[0].owner;
         const nonce = result.result.data.init.nonceAddress;
 
@@ -57,7 +59,7 @@ class QuotesClient extends MuonClient {
           gatewaySignature,
           sigs: { signature, owner, nonce },
         };
-        console.log("Generated Signature: ", generatedSignature);
+
         return { success: true, signature: generatedSignature };
         
       } else {
@@ -69,15 +71,17 @@ class QuotesClient extends MuonClient {
     }
   }
 
-  _getRequestParams(account, chainId, contractAddress) {
+  _getRequestParams(account, chainId, contractAddress, marketId) {
     if (!account) return new Error("Param `account` is missing.");
     if (!chainId) return new Error("Param `chainId` is missing.");
     if (!contractAddress) return new Error("Param `contractAddress` is missing.");
+    if (!marketId) return new Error("Param `marketId` is missing.");
 
     return [
       ["partyA", account],
       ["chainId", chainId.toString()],
       ["symmio", contractAddress],
+      ["symbolId", marketId.toString()],
     ];
   }
 }

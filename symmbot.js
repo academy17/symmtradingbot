@@ -45,7 +45,7 @@ async function addAccount(accountName) {
 
   try {
     const currentGasPrice = await web3.eth.getGasPrice();
-    const increasedGasPriceBigInt = BigInt(currentGasPrice) * BigInt(120)
+    const increasedGasPriceBigInt = BigInt(currentGasPrice) * BigInt(120) / BigInt(100);
     const gasEstimate = await multiAccountContract.methods.addAccount(accountName).estimateGas();
     const gasEstimateBigInt = BigInt(gasEstimate);
     const gasLimitWithBuffer = gasEstimateBigInt + (gasEstimateBigInt * BigInt(20) / BigInt(100));
@@ -115,7 +115,7 @@ async function depositAndAllocateForAccount(accountAddress, amount, multiAccount
       const approveGas = await approveTx.estimateGas({ from: process.env.WALLET_ADDRESS });
       const approveGasPrice = await web3.eth.getGasPrice();
 
-      const bufferPercentage = 1;
+      const bufferPercentage = 20;
       const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
       const adjustedApproveGasLimit = approveGas + (approveGas * bufferFactor / BigInt(100));
 
@@ -271,7 +271,6 @@ async function getMuonSigImplementation(subAccountAddress, diamondAddress) {
     const result = await quotesClient.getMuonSig(account, appName, urls, chainId, contractAddress, marketId);
 
     if (result.success) {
-      console.log('Successfully retrieved Muon signature:', result.signature);
       return { success: true, signature: result.signature };
     } else {
       throw new Error(result.error || 'Unknown error');
@@ -472,6 +471,9 @@ async function executeSendQuoteMarket(subAccountAddress, positionType, quantity,
     [ encodedSendQuoteData ]
   ];
 
+  const calldataEncoded = web3.eth.abi.encodeFunctionCall(_callAbi, _callData);
+  console.log("callDataEncoded: ", calldataEncoded);
+  console.log("Calldata: ", _callData);
 
     try {
       const bufferPercentage = 0.20;
@@ -488,19 +490,26 @@ async function executeSendQuoteMarket(subAccountAddress, positionType, quantity,
         gasPrice: sendQuotePrice.toString() 
       });
 
-      if (receipt.events.SendQuote) {
-        const event = receipt.events.AddAccount.returnValues;
-        console.log("SendQuote ID: ", event.quoteId);
-        return event.quoteId;
-      } else {
-        console.log("No AddAccount event found.");
-      }
-      
-  console.log('Transaction receipt:', sendQuoteReceipt);
+    const sendQuoteContractAddress = diamondAddress.toLowerCase();
+    const sendQuoteEventSignatureHash = '0x8a17f103c77224ce4d9bab74dad3bd002cd24cf88d2e191e86d18272c8f135dd';
 
-    } catch (error) {
-        console.error('Error sending quote:', error);
+    const sendQuoteLogs = sendQuoteReceipt.logs.filter(log => 
+        log.address.toLowerCase() === sendQuoteContractAddress &&
+        log.topics[0] === sendQuoteEventSignatureHash
+    );
+
+    if (sendQuoteLogs.length > 0) {
+        sendQuoteLogs.forEach(log => {
+            const decodedData = web3.eth.abi.decodeParameters(['address', 'uint256', 'address[]', 'uint256', 'uint8', 'uint8', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'], log.data);
+            console.log("SendQuote ID: ", decodedData[1]); // Assuming quoteId is the second parameter
+        });
+    } else {
+        console.log("No SendQuote event found.");
     }
+} catch (error) {
+    console.error('Error sending quote:', error);
+}
+
   } else {
     console.error('Failed to obtain signature:', signatureResult.error);
   }
@@ -588,16 +597,16 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
 
 async function run() {
   try {
-    const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
-    //const depositAmountWei = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
+    //const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
+    const depositAmountWei = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
     //await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
     //await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
     //await deallocateForAccount(subAccountAddress, depositAmountWei. config.DIAMOND_ADDRESS);
     //await withdrawFromAccount(subAccountAddress, depositAmountWei);
-    console.log(subAccountAddress);
-    //readyToTrade(); //Trading is now allowed...
-    //console.log("Bot setup successful. ");
-    //await startPriceMonitoring(subAccountAddress);
+    //console.log(subAccountAddress);
+    readyToTrade(); //Trading is now allowed...
+    console.log("Bot setup successful. ");
+    await startPriceMonitoring(subAccountAddress);
   } catch (error) {
     console.error("Error in bot setup:", error);
   }

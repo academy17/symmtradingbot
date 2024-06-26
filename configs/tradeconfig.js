@@ -1,10 +1,9 @@
 const TradeManagementConfig = {
-    LOWER_THRESHOLD_PRICE: 1500, // Lower Price (float)
-    UPPER_THRESHOLD_PRICE: 2500, // Upper Price (float)
-    SYMBOL: 'ETH', // 'ETH'
-    QUANTITY: 10, // Units of Requested Quantity
-    LEVERAGE: 2, // Leverage
-    ORDERTYPE: 1 // OrderType
+    LOWER_THRESHOLD_PRICE: 0.65,
+    UPPER_THRESHOLD_PRICE: 0.7,
+    SYMBOL: 'XRP',
+    QUANTITY: 163.1,
+    LEVERAGE: 2,
   };
 
   module.exports = TradeManagementConfig;
