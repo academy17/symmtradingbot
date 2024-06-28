@@ -14,7 +14,7 @@ const collateralABI = require('./abi/FakeStableCoinABI');
 const { multiAccountABI } = require('./abi/MultiAccount');
 const { sendQuoteFunctionAbi, _callAbi } = require('./abi/SendQuote');
 const { deallocateFunctionAbi} = require('./abi/Deallocate');
-const { requestToCloseAbi } = require('./abi/requestToClosePositionFunctionAbi');
+const { requestToClosePositionFunctionAbi } = require('./abi/RequestToClose');
 
 //MUON
 const QuotesClient = require('./src/muon/quotes');
@@ -70,7 +70,6 @@ async function addAccount(accountName) {
     console.error("Failed to add account:", error);
   }
 }
-
 //Minting Collateral (for test purposes)
 async function mintCollateralTokens(amount, collateralAddress) {
   try {
@@ -190,7 +189,6 @@ async function deallocateForAccount(accountAddress, amount, diamondAddress) {
 
       const _callData = [accountAddress, [encodedDeallocateData]];
 
-      // Estimate gas for the _call method
       const deallocateGasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
       console.log("Estimated Gas: ", deallocateGasEstimate);
 
@@ -250,7 +248,6 @@ async function withdrawFromAccount(accountAddress, amount) {
     return { success: false, error: error.toString() };
   }
 }
-
 
 //Get a signature for a sendQuote
 async function getMuonSigImplementation(subAccountAddress, diamondAddress) {
@@ -346,7 +343,7 @@ async function fetchLockedParams(pair, leverage, hedgerUrl) {
 
 }
 
-
+//Function to send a Quote
 async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
   const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
@@ -516,7 +513,7 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
   }
 }
 
-//TODO Testing
+//Function to sendQuote with zero partyAmm  (minimal locked collateral required)
 async function executeSendQuoteZeroMM(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
   const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
@@ -677,8 +674,7 @@ async function executeSendQuoteZeroMM(subAccountAddress, positionType, orderType
     console.error('Failed to obtain signature:', signatureResult.error);
   }
 }
-
-//TODO Testing
+//Closing a position
 async function closePosition(accountAddress, quoteId, closePrice, quantityToClose, orderType, deadline) {
   console.log("Requesting to close position...");
   
@@ -686,21 +682,24 @@ async function closePosition(accountAddress, quoteId, closePrice, quantityToClos
   const deadlineInSeconds = nowInSeconds + deadline;
   
   try {
-      const closePositionParameters = [quoteId, closePrice, quantityToClose, orderType, deadlineInSeconds];
+        const closePositionParameters = [
+          quoteId.toString(), 
+          closePrice.toString(), 
+          quantityToClose.toString(), 
+          orderType, 
+          deadlineInSeconds.toString()
+      ];
+
       const encodedClosePositionData = web3.eth.abi.encodeFunctionCall(requestToClosePositionFunctionAbi, closePositionParameters);
       
       const _callData = [accountAddress, [encodedClosePositionData]];
-
-      // Estimate gas for the _call method
-      const gasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
-      console.log("Estimated Gas: ", gasEstimate);
-
-      const bufferPercentage = 0.20; // Smaller buffer as transaction might be less complex
-      const bufferFactor = Math.floor(bufferPercentage * 100);
-      const adjustedGasLimit = gasEstimate + (gasEstimate * bufferFactor / 100);
-      console.log("Adjusted Gas Limit: ", adjustedGasLimit);
-
       const gasPrice = await web3.eth.getGasPrice();
+      const gasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
+      const gasEstimateBigInt = BigInt(gasEstimate);
+      console.log("Estimated Gas: ", gasEstimate);
+      const bufferPercentage = 0.20; // Smaller buffer as transaction might be less complex
+      const adjustedGasLimit = gasEstimateBigInt + (gasEstimateBigInt * BigInt(20) / BigInt(100));
+      console.log("Adjusted Gas Limit: ", adjustedGasLimit);
       console.log("Current Gas Price: ", gasPrice);
 
       // Sending the transaction
@@ -710,6 +709,7 @@ async function closePosition(accountAddress, quoteId, closePrice, quantityToClos
           gasPrice: gasPrice.toString()
       });
 
+      console.log("Transaction Receipt: ", transactionReceipt);
       console.log("Position close request successful!");
       return { success: true, receipt: transactionReceipt };
   } catch (error) {
@@ -717,7 +717,7 @@ async function closePosition(accountAddress, quoteId, closePrice, quantityToClos
       return { success: false, error: error.toString() };
   }
 }
-
+//Stopping the binance webSocket
 function closeAndExit(binanceWs, error = null) {
   if (error) {
       console.error("Failed to execute quote:", error);
@@ -729,7 +729,7 @@ function closeAndExit(binanceWs, error = null) {
   console.log("Bot Closed");
   process.exit(0);
 }
-
+//Starting price monitoring with binance websocket
 async function startPriceMonitoring(subAccountAddress) {
   let binanceWs; 
   try {
@@ -758,6 +758,7 @@ async function startPriceMonitoring(subAccountAddress) {
 let actionTaken = false;
 let debouncer;
 
+//Function for Executing orders based on price received by Binance WS
 async function handleMessage(message, subAccountAddress, marketId, binanceWs, lowerThresholdPrice, upperThresholdPrice) {
     if (actionTaken) return;
 
@@ -767,7 +768,7 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
 
     if (price > upperThresholdPrice && accountSetup && !actionTaken) {
         console.log(`Price over threshold: ${price}`);
-        actionTaken = true;  // Set actionTaken true immediately before the async operation
+        actionTaken = true;  
         try {
             console.log("Shorting...");
             const quoteId = await executeSendQuoteMarket(subAccountAddress, 1, config.ORDERTYPE, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
@@ -779,7 +780,7 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
         }
     } else if (price < lowerThresholdPrice && accountSetup && !actionTaken) {
         console.log(`Price under threshold: ${price}`);
-        actionTaken = true;  // Set actionTaken true immediately before the async operation
+        actionTaken = true;  
         try {
             console.log("Longing...");
             const quoteId = await executeSendQuoteMarket(subAccountAddress, 0, config.ORDERTYPE, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
@@ -797,20 +798,12 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
     }, 30000);
 }
 
-
 async function run() {
   try {
-    //const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
+    const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
     const depositAmountWei = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
-    //await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
-    //await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
-    //await deallocateForAccount(subAccountAddress, depositAmountWei. config.DIAMOND_ADDRESS);
-    //await withdrawFromAccount(subAccountAddress, depositAmountWei);
-
-    //TODO
-    await executeSendQuoteMinimalCollateral();
-    await closePosition();
-    //console.log(subAccountAddress);
+    await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
+    await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
     readyToTrade(); //Trading is now allowed...
     console.log("Bot setup successful. ");
     await startPriceMonitoring(subAccountAddress);
@@ -819,5 +812,4 @@ async function run() {
   }
 }
 
-run();
-//.then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
+run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
