@@ -344,6 +344,9 @@ async function fetchLockedParams(pair, leverage, hedgerUrl) {
 }
 
 //Function to send a Quote
+// config with params that are identical accross most calls on a chain ( eg subaccount party B diamond ) => config = config.ARB
+// other params modificable, eg market type quantity 
+
 async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
   const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
@@ -351,6 +354,7 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
   //const pricePrecision = markets[0].pricePrecision;
 
   const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress);
+  // this is is the account health
   let adjustedPrice = BigInt(signatureResult.signature.price);
   let numericSlippage;
 
