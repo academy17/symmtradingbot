@@ -250,7 +250,8 @@ async function withdrawFromAccount(accountAddress, amount) {
 }
 
 //Get a signature for a sendQuote
-async function getMuonSigImplementation(subAccountAddress, diamondAddress) {
+async function getMuonSigImplementation(subAccountAddress, diamondAddress) { //TODO: use the values in config with getmuonsig
+
   const quotesClient = QuotesClient.createInstance(true);
 
   if (!quotesClient) {
@@ -344,9 +345,9 @@ async function fetchLockedParams(pair, leverage, hedgerUrl) {
 }
 
 //Function to send a Quote
-async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
+async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) { //TODO: Change this to make it so it inputs the configs
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
+  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL); //TODO Do a function with max leverage too, have leverage as a modifiable parameter. Make this change across the whole bot
   const autoSlippage = markets[0].autoSlippage;
   //const pricePrecision = markets[0].pricePrecision;
 
@@ -373,7 +374,7 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
       adjustedPrice = (adjustedPrice * slippageFactorBigInt) / BigInt(100);
     }
   
-    const requestedPrice = adjustedPrice;
+    const requestedPrice = adjustedPrice; //TODO MAKE CLEARER
 
     const { reqId, timestamp, upnl, price, gatewaySignature, sigs } = signatureResult.signature;
     console.log("Price of asset: ", price);
@@ -516,7 +517,7 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
 //Function to sendQuote with zero partyAmm  (minimal locked collateral required)
 async function executeSendQuoteZeroMM(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL);
+  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL); //TODO: Max leverage means zero MM so we need to call fetch_locked_params with max leverage
   const autoSlippage = markets[0].autoSlippage;
   //const pricePrecision = markets[0].pricePrecision;
 
