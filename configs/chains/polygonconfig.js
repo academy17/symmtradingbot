@@ -15,6 +15,7 @@ const PolygonConfig = {
     ANALYTICS_SUBGRAPH_ADDRESS: "https://api.thegraph.com/subgraphs/name/symmiograph/symmiomain_polygon_8_2",
     ORDER_HISTORY_SUBGRAPH_ADDRESS: "https://api.thegraph.com/subgraphs/name/symmiograph/symmiomain_polygon_8_2",
     HEDGER_URL: 'https://alpha-hedger.rasa.capital/',
+    CHAIN_ID: 137,
 };
 
 module.exports = PolygonConfig;

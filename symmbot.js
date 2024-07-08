@@ -250,7 +250,7 @@ async function withdrawFromAccount(accountAddress, amount) {
 }
 
 //Get a signature for a sendQuote
-async function getMuonSigImplementation(subAccountAddress, diamondAddress) { //TODO: use the values in config with getmuonsig
+async function getMuonSigImplementation(subAccountAddress, diamondAddress, chainId, marketId) {
 
   const quotesClient = QuotesClient.createInstance(true);
 
@@ -262,9 +262,9 @@ async function getMuonSigImplementation(subAccountAddress, diamondAddress) { //T
   const account = subAccountAddress;
   const appName = 'symmio';
   const urls = [process.env.MUON_URL];
-  const chainId = 137;
+  const chainId = 137; //TODO: Change this to a config value in polygon/arb
   const contractAddress = diamondAddress;
-  const marketId = 4;
+  //const marketId = 4; //TODO: Change this to a live variable in the main bot script 
 
   try {
     const result = await quotesClient.getMuonSig(account, appName, urls, chainId, contractAddress, marketId);
@@ -345,13 +345,12 @@ async function fetchLockedParams(pair, leverage, hedgerUrl) {
 }
 
 //Function to send a Quote
-async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) { //TODO: Change this to make it so it inputs the configs
-  const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL); //TODO Do a function with max leverage too, have leverage as a modifiable parameter. Make this change across the whole bot
+async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist, leverage, hedgerUrl, symbol, marketId) { //TODO: Change this to make it so it inputs the configs config.HEDGER_URL and config.SYMBOL
+  const { markets } = await fetchMarketSymbolId(hedgerUrl, symbol);
+  const lockedParams = await fetchLockedParams(markets[0].name, leverage, hedgerUrl); //TODO Do a function with max leverage too, have leverage as a modifiable parameter. Make this change across the whole bot
   const autoSlippage = markets[0].autoSlippage;
-  //const pricePrecision = markets[0].pricePrecision;
 
-  const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress);
+  const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress, marketId);
   let adjustedPrice = BigInt(signatureResult.signature.price);
   let numericSlippage;
 
@@ -432,11 +431,6 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
     / (new BigNumber(1e18));
   
   
-    //console.log("partyAmm: ", partyAmmWei);
-  
-    
-    //console.log("partyAmm: ", partyAmmWei);
-  
     const partyBmmWei = notionalValue
     * (new BigNumber(lockedParams.partyBmm * 100))
     / (new BigNumber(10000)) 
@@ -514,10 +508,14 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
   }
 }
 
+function executeSendQuoteMinCollateralLMaxLeverage() {
+
+}
+
 //Function to sendQuote with zero partyAmm  (minimal locked collateral required)
-async function executeSendQuoteZeroMM(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist) {
+async function executeSendQuoteZeroMM(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist, leverage) {
   const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, config.LEVERAGE, config.HEDGER_URL); //TODO: Max leverage means zero MM so we need to call fetch_locked_params with max leverage
+  const lockedParams = await fetchLockedParams(markets[0].name, leverage, config.HEDGER_URL); //TODO: Max leverage means zero MM so we need to call fetch_locked_params with max leverage
   const autoSlippage = markets[0].autoSlippage;
   //const pricePrecision = markets[0].pricePrecision;
 
@@ -731,10 +729,10 @@ function closeAndExit(binanceWs, error = null) {
   process.exit(0);
 }
 //Starting price monitoring with binance websocket
-async function startPriceMonitoring(subAccountAddress) {
+async function startPriceMonitoring(subAccountAddress, marketId, hedgerUrl, symbol, thresholdLower, thresholdUpper) { //PASS THE MARKET ID HERE
   let binanceWs; 
   try {
-      const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
+      const { markets } = await fetchMarketSymbolId(hedgerUrl, symbol);
       if (markets.length === 0) {
           console.error("No markets found for the specified symbol.");
           return;
@@ -748,7 +746,7 @@ async function startPriceMonitoring(subAccountAddress) {
           console.log('Connected to Binance WebSocket');
       });
       binanceWs.on('message', (message) => {
-          handleMessage(message, subAccountAddress, marketId, binanceWs, config.LOWER_THRESHOLD_PRICE, config.UPPER_THRESHOLD_PRICE); // Pass WebSocket instance for handling
+          handleMessage(message, subAccountAddress, marketId, binanceWs, thresholdLower, thresholdUpper); // Pass WebSocket instance for handling
       });
   } catch (error) {
       console.error("Error setting up price monitoring:", error);
@@ -807,7 +805,7 @@ async function run() {
     await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
     readyToTrade(); //Trading is now allowed...
     console.log("Bot setup successful. ");
-    await startPriceMonitoring(subAccountAddress);
+    await startPriceMonitoring(subAccountAddress, marketId, config.HEDGER_URL, config.SYMBOL, config.LOWER_THRESHOLD_PRICE, config.UPPER_THRESHOLD_PRICE);
   } catch (error) {
     console.error("Error in bot setup:", error);
   }
