@@ -1,6 +1,7 @@
 const ConfigTypes = require('./configs/chains/configTypes.js');
 const BaseConfig = require('./configs/chains/baseconfig.js');
 const PolygonConfig = require('./configs/chains/polygonconfig.js');
+const ArbitrumConfig = require('./configs/chains/arbitrumconfig.js');
 const AccountManagementConfig = require('./configs/accountconfig.js');
 const TradeManagementConfig = require('./configs/tradeconfig.js');
 
@@ -15,6 +16,8 @@ switch (configType) {
   case ConfigTypes.POLYGON:
     chainConfig = PolygonConfig;
     break;
+  case ConfigTypes.ARBITRUM:
+      chainConfig = ArbitrumConfig;
   default:
     throw new Error('Invalid config type');
 }

@@ -1,6 +1,6 @@
 //CONFIGS
 require('dotenv').config()
-const config = require('./config');
+const config = require('./configA');
 
 const { Web3 } = require('web3');
 const WebSocket = require('ws');
@@ -161,7 +161,7 @@ async function deallocateForAccount(accountAddress, amount, diamondAddress) {
   const account = accountAddress;
   const appName = 'symmio';
   const urls = [process.env.MUON_URL];
-  const chainId = 137;
+  const chainId = 137; //TODO: Fetch from config
   const contractAddress = diamondAddress;
 
   try {
@@ -250,6 +250,7 @@ async function withdrawFromAccount(accountAddress, amount) {
 }
 
 //Get a signature for a sendQuote
+//TODO: Refactor, redundant function
 async function getMuonSigImplementation(subAccountAddress, diamondAddress, chainId, marketId) {
 
   const quotesClient = QuotesClient.createInstance(true);
@@ -508,6 +509,7 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
   }
 }
 
+//TODO: Merge functions
 function executeSendQuoteMinCollateralLMaxLeverage() {
 
 }
