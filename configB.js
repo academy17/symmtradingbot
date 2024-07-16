@@ -1,10 +1,10 @@
 const ConfigTypes = require('./configs/chains/configTypes.js');
-const BaseConfig = require('./configs/chains/baseconfig.js');
 const PolygonConfig = require('./configs/chains/polygonconfig.js');
+const BaseConfig = require('./configs/chains/baseconfig.js');
 const ArbitrumConfig = require('./configs/chains/arbitrumconfig.js');
 const HedgerConfig = require('./configs/hedgerconfig.js');
 
-const configType = ConfigTypes.BASE; // Change this value to switch configurations
+const configType = ConfigTypes.POLYGON; // Change this value to switch configurations
 
 let chainConfig;
 

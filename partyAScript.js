@@ -19,6 +19,7 @@ const { requestToClosePositionFunctionAbi } = require('./abi/RequestToClose');
 //MUON
 const QuotesClient = require('./src/muon/quotes');
 const DeallocateClient = require('./src/muon/deallocate');
+const { start } = require('repl');
 
 //WEB3 Contracts
 const web3 = new Web3(new Web3.providers.HttpProvider(process.env.PROVIDER_URL));
@@ -149,7 +150,7 @@ async function depositAndAllocateForAccount(accountAddress, amount, multiAccount
   }
 }
 //Deallocate
-async function deallocateForAccount(accountAddress, amount, diamondAddress) {
+async function deallocateForAccount(accountAddress, amount, diamondAddress, muonUrl, chainId) {
   console.log("Deallocating...");
   const deallocateClient = DeallocateClient.createInstance(true);
 
@@ -158,14 +159,10 @@ async function deallocateForAccount(accountAddress, amount, diamondAddress) {
     return { success: false, error: 'DeallocateClient initialization failed' };
   }
 
-  const account = accountAddress;
   const appName = 'symmio';
-  const urls = [process.env.MUON_URL];
-  const chainId = 137; //TODO: Fetch from config
-  const contractAddress = diamondAddress;
 
   try {
-    const signatureResult = await deallocateClient.getMuonSig(account, appName, urls, chainId, contractAddress);
+    const signatureResult = await deallocateClient.getMuonSig(accountAddress, appName, muonUrl, chainId, diamondAddress);
 
     if (signatureResult.success) {
       const { reqId, timestamp, upnl, gatewaySignature, sigs } = signatureResult.signature;
@@ -251,6 +248,7 @@ async function withdrawFromAccount(accountAddress, amount) {
 
 //Get a signature for a sendQuote
 //TODO: Refactor, redundant function
+/*
 async function getMuonSigImplementation(subAccountAddress, diamondAddress, chainId, marketId) {
 
   const quotesClient = QuotesClient.createInstance(true);
@@ -280,6 +278,7 @@ async function getMuonSigImplementation(subAccountAddress, diamondAddress, chain
     return { success: false, error: error.toString() };
   }
 }
+  */
 
 //Helper Function to fetch the market by symbol (e.g. BTC)
 async function fetchMarketSymbolId(url, symbol) {
@@ -346,12 +345,31 @@ async function fetchLockedParams(pair, leverage, hedgerUrl) {
 }
 
 //Function to send a Quote
-async function executeSendQuote(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist, leverage, hedgerUrl, symbol, marketId) { //TODO: Change this to make it so it inputs the configs config.HEDGER_URL and config.SYMBOL
+async function executeSendQuote(
+  subAccountAddress, 
+  positionType, 
+  orderType, 
+  quantity, 
+  slippage, 
+  diamondAddress, 
+  partyBWhitelist, 
+  leverage, 
+  hedgerUrl, 
+  muonUrl,
+  symbol, 
+  deadline,
+  maxFundingRate) { 
   const { markets } = await fetchMarketSymbolId(hedgerUrl, symbol);
-  const lockedParams = await fetchLockedParams(markets[0].name, leverage, hedgerUrl); //TODO Do a function with max leverage too, have leverage as a modifiable parameter. Make this change across the whole bot
+  const marketId = markets[0].id;
+  const lockedParams = await fetchLockedParams(markets[0].name, leverage, hedgerUrl); 
   const autoSlippage = markets[0].autoSlippage;
 
-  const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress, marketId);
+  const quotesClient = QuotesClient.createInstance(true);
+  const appName = 'symmio';
+
+  //const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress, marketId);
+  const signatureResult = await quotesClient.getMuonSig(subAccountAddress, appName, muonUrl, chainId, diamondAddress, marketId);
+
   let adjustedPrice = BigInt(signatureResult.signature.price);
   let numericSlippage;
 
@@ -374,7 +392,7 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
       adjustedPrice = (adjustedPrice * slippageFactorBigInt) / BigInt(100);
     }
   
-    const requestedPrice = adjustedPrice; //TODO MAKE CLEARER
+    const requestPrice = adjustedPrice; 
 
     const { reqId, timestamp, upnl, price, gatewaySignature, sigs } = signatureResult.signature;
     console.log("Price of asset: ", price);
@@ -440,14 +458,12 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
   
   
     //Max funding and deadline
-    const maxFundingRate = web3.utils.toWei('200', 'ether'); 
-    const deadline = (Math.floor(Date.now() / 1000) + 120).toString();
     const sendQuoteParameters = [
       partyBsWhiteList,
       symbolId,
       positionType,
       orderType,
-      requestedPrice.toString(), 
+      requestPrice.toString(), 
       requestedQuantityWei.toString(),
       cvaWei.toString(), 
       lfWei.toString(),
@@ -509,172 +525,8 @@ async function executeSendQuote(subAccountAddress, positionType, orderType, quan
   }
 }
 
-//TODO: Merge functions
-function executeSendQuoteMinCollateralLMaxLeverage() {
-
-}
-
-//Function to sendQuote with zero partyAmm  (minimal locked collateral required)
-async function executeSendQuoteZeroMM(subAccountAddress, positionType, orderType, quantity, slippage, diamondAddress, partyBWhitelist, leverage) {
-  const { markets } = await fetchMarketSymbolId(config.HEDGER_URL, config.SYMBOL);
-  const lockedParams = await fetchLockedParams(markets[0].name, leverage, config.HEDGER_URL); //TODO: Max leverage means zero MM so we need to call fetch_locked_params with max leverage
-  const autoSlippage = markets[0].autoSlippage;
-  //const pricePrecision = markets[0].pricePrecision;
-
-  const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress);
-  let adjustedPrice = BigInt(signatureResult.signature.price);
-  let numericSlippage;
-
-  if (signatureResult.success) {
-    if (slippage === "auto") {
-      const autoSlippageNumerator = BigInt(Math.floor(autoSlippage * 1000));
-      const autoSlippageDenominator = BigInt(1000); 
-      adjustedPrice = positionType === 1
-        ? (adjustedPrice * autoSlippageDenominator) / autoSlippageNumerator
-        : (adjustedPrice * autoSlippageNumerator) / autoSlippageDenominator;
-    } else {
-      numericSlippage = Number(slippage); 
-      if (isNaN(numericSlippage)) {
-        console.error("Slippage must be a number or 'auto'");
-        return;
-      }
-      const spSigned = positionType === 1 ? numericSlippage : -numericSlippage;
-      const slippageFactored = (100 - spSigned) / 100;
-      const slippageFactorBigInt = BigInt(Math.floor(slippageFactored * 100));
-      adjustedPrice = (adjustedPrice * slippageFactorBigInt) / BigInt(100);
-    }
-  
-    const requestedPrice = adjustedPrice;
-
-    const { reqId, timestamp, upnl, price, gatewaySignature, sigs } = signatureResult.signature;
-    console.log("Price of asset: ", price);
-    if (typeof reqId === 'undefined' || !reqId.startsWith('0x')) {
-      console.error("reqId is undefined or not a hex string:", reqId);
-    }
-    if (typeof gatewaySignature === 'undefined' || !gatewaySignature.startsWith('0x')) {
-      console.error("gatewaySignature is undefined or not a hex string:", gatewaySignature);
-    }
 
 
-    const upnlSigFormatted = {
-        reqId: web3.utils.hexToBytes(reqId),
-        timestamp: timestamp.toString(),
-        upnl: upnl.toString(),
-        price: price.toString(),
-        gatewaySignature: web3.utils.hexToBytes(gatewaySignature),
-        sigs: {
-            signature: sigs.signature.toString(),
-            owner: sigs.owner,
-            nonce: sigs.nonce,
-        }
-    };
-
-    const partyBsWhiteList = [partyBWhitelist];
-    const symbolId = markets[0].id;
-
-    //QUANTITY
-    const requestedQuantityWei = web3.utils.toWei(quantity.toString(), 'ether');
-    console.log("requestedQuantityWei:", requestedQuantityWei);
-    const adjustedPriceStr = adjustedPrice.toString();
-
-    const notionalValue = new BigNumber(requestedQuantityWei).multipliedBy(new BigNumber(adjustedPriceStr));
-    console.log("notionalValue:", notionalValue.toString());
-  
-    //CVA
-    const cvaWei = notionalValue
-    * (new BigNumber(lockedParams.cva * 100))
-    / (new BigNumber(10000)) 
-    / (new BigNumber(lockedParams.leverage))
-    / (new BigNumber(1e18));
-
-    //LF
-    const lfWei = notionalValue
-    * (new BigNumber(lockedParams.lf * 100))
-    / (new BigNumber(10000)) 
-    / (new BigNumber(lockedParams.leverage))
-    / (new BigNumber(1e18));
-  
-    //Maintenance Margins
-    const partyAmmWei = notionalValue
-    * (new BigNumber(0))
-
-    
-    const partyBmmWei = notionalValue
-    * (new BigNumber(lockedParams.partyBmm * 100))
-    / (new BigNumber(10000)) 
-    / (new BigNumber(lockedParams.leverage))
-    / (new BigNumber(1e18));
-  
-  
-    //Max funding and deadline
-    const maxFundingRate = web3.utils.toWei('200', 'ether'); 
-    const deadline = (Math.floor(Date.now() / 1000) + 120).toString();
-    const sendQuoteParameters = [
-      partyBsWhiteList,
-      symbolId,
-      positionType,
-      orderType,
-      requestedPrice.toString(), 
-      requestedQuantityWei.toString(),
-      cvaWei.toString(), 
-      lfWei.toString(),
-      partyAmmWei.toString(),
-      partyBmmWei.toString(), 
-      maxFundingRate.toString(), 
-      deadline.toString(),
-      upnlSigFormatted
-  ];
-
-  const encodedSendQuoteData = web3.eth.abi.encodeFunctionCall(sendQuoteFunctionAbi, sendQuoteParameters);
-
-  const _callData = [
-    subAccountAddress,
-    [ encodedSendQuoteData ]
-  ];
-
-  const calldataEncoded = web3.eth.abi.encodeFunctionCall(_callAbi, _callData);
-  console.log("callDataEncoded: ", calldataEncoded);
-  console.log("Calldata: ", _callData);
-
-    try {
-      const bufferPercentage = 0.20;
-      const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
-      const sendQuoteGasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
-      console.log("Estimated Gas: ", sendQuoteGasEstimate);
-            const adjustedGasLimit = sendQuoteGasEstimate + (sendQuoteGasEstimate * bufferFactor / BigInt(100));
-      console.log("Adjusted Gas Limit: ", adjustedGasLimit);
-      const sendQuotePrice = await web3.eth.getGasPrice();
-      console.log("Current Gas Price: ", sendQuotePrice);
-            const sendQuoteReceipt = await multiAccountContract.methods._call(..._callData).send({
-        from: account.address,
-        gas: adjustedGasLimit.toString(), 
-        gasPrice: sendQuotePrice.toString() 
-      });
-
-    const sendQuoteContractAddress = diamondAddress.toLowerCase();
-    const sendQuoteEventSignatureHash = '0x8a17f103c77224ce4d9bab74dad3bd002cd24cf88d2e191e86d18272c8f135dd';
-
-    const sendQuoteLogs = sendQuoteReceipt.logs.filter(log => 
-        log.address.toLowerCase() === sendQuoteContractAddress &&
-        log.topics[0] === sendQuoteEventSignatureHash
-    );
-
-    if (sendQuoteLogs.length > 0) {
-        sendQuoteLogs.forEach(log => {
-            const decodedData = web3.eth.abi.decodeParameters(['address', 'uint256', 'address[]', 'uint256', 'uint8', 'uint8', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'], log.data);
-            console.log("SendQuote ID: ", decodedData[1]); // Assuming quoteId is the second parameter
-        });
-    } else {
-        console.log("No SendQuote event found.");
-    }
-} catch (error) {
-    console.error('Error sending quote:', error);
-}
-
-  } else {
-    console.error('Failed to obtain signature:', signatureResult.error);
-  }
-}
 //Closing a position
 async function closePosition(accountAddress, quoteId, closePrice, quantityToClose, orderType, deadline) {
   console.log("Requesting to close position...");
@@ -731,7 +583,20 @@ function closeAndExit(binanceWs, error = null) {
   process.exit(0);
 }
 //Starting price monitoring with binance websocket
-async function startPriceMonitoring(subAccountAddress, marketId, hedgerUrl, symbol, thresholdLower, thresholdUpper) { //PASS THE MARKET ID HERE
+async function startPriceMonitoring(
+  subAccountAddress,
+  lowerThresholdPrice, 
+  upperThresholdPrice, 
+  quantity, 
+  slippage, 
+  diamondAddress, 
+  partyBWhitelist, 
+  leverage, 
+  hedgerUrl, 
+  muonUrl, 
+  symbol, 
+  deadline, 
+  maxFundingRate) { 
   let binanceWs; 
   try {
       const { markets } = await fetchMarketSymbolId(hedgerUrl, symbol);
@@ -748,8 +613,26 @@ async function startPriceMonitoring(subAccountAddress, marketId, hedgerUrl, symb
           console.log('Connected to Binance WebSocket');
       });
       binanceWs.on('message', (message) => {
-          handleMessage(message, subAccountAddress, marketId, binanceWs, thresholdLower, thresholdUpper); // Pass WebSocket instance for handling
-      });
+        handleMessage(
+          message, 
+          subAccountAddress, 
+          marketId, 
+          binanceWs, 
+          lowerThresholdPrice, 
+          upperThresholdPrice, 
+          quantity, 
+          slippage, 
+          diamondAddress, 
+          partyBWhitelist, 
+          leverage, 
+          hedgerUrl, 
+          muonUrl, 
+          symbol, 
+          marketId, 
+          deadline, 
+          maxFundingRate
+        );
+            });
   } catch (error) {
       console.error("Error setting up price monitoring:", error);
       closeAndExit(binanceWs, error); 
@@ -760,7 +643,24 @@ let actionTaken = false;
 let debouncer;
 
 //Function for Executing orders based on price received by Binance WS
-async function handleMessage(message, subAccountAddress, marketId, binanceWs, lowerThresholdPrice, upperThresholdPrice) {
+async function handleMessage(
+  message, 
+  subAccountAddress, 
+  marketId, 
+  binanceWs, 
+  lowerThresholdPrice, 
+  upperThresholdPrice, 
+  quantity, 
+  slippage, 
+  diamondAddress, 
+  partyBWhitelist, 
+  leverage, 
+  hedgerUrl, 
+  muonUrl, 
+  symbol, 
+  marketId, 
+  deadline, 
+  maxFundingRate) {
     if (actionTaken) return;
 
     const data = JSON.parse(message);
@@ -772,7 +672,22 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
         actionTaken = true;  
         try {
             console.log("Shorting...");
-            const quoteId = await executeSendQuoteMarket(subAccountAddress, 1, config.ORDERTYPE, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
+            const quoteId = await executeSendQuote(
+              subAccountAddress, 
+              positionType, 
+              orderType, 
+              quantity, 
+              slippage, 
+              diamondAddress,
+              partyBWhitelist, 
+              leverage, 
+              hedgerUrl, 
+              muonUrl, 
+              symbol, 
+              marketId, 
+              deadline, 
+              maxFundingRate
+            );
             console.log("Short Successful! Quote Id: ", quoteId);
             closeAndExit(binanceWs);
         } catch (error) {
@@ -784,7 +699,22 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
         actionTaken = true;  
         try {
             console.log("Longing...");
-            const quoteId = await executeSendQuoteMarket(subAccountAddress, 0, config.ORDERTYPE, config.QUANTITY, "auto", config.DIAMOND_ADDRESS, config.PARTY_B_WHITELIST);
+            const quoteId = await executeSendQuote(
+              subAccountAddress, 
+              positionType, 
+              orderType, 
+              quantity, 
+              slippage, 
+              diamondAddress,
+              partyBWhitelist, 
+              leverage, 
+              hedgerUrl, 
+              muonUrl, 
+              symbol, 
+              marketId, 
+              deadline, 
+              maxFundingRate
+            );
             console.log("Long Successful! Quote Id: ", quoteId);
             closeAndExit(binanceWs);
         } catch (error) {
@@ -800,17 +730,56 @@ async function handleMessage(message, subAccountAddress, marketId, binanceWs, lo
 }
 
 async function run() {
+  const maxFundingRate = web3.utils.toWei('200', 'ether'); 
+  const deadline = (Math.floor(Date.now() / 1000) + 86400).toString();
+
   try {
-    const subAccountAddress = await addAccount(config.ACCOUNT_NAME);
+    const subAccountAddress = '0x49DE275B9890C4F93Ca37756da40eA37a4cefBAD';
+    console.log("SubAccountAddress: ", subAccountAddress);
     const depositAmountWei = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
-    await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
-    await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
+    //await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
+    //await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
+
+    await executeSendQuote(
+      subAccountAddress, 
+      1, 
+      1, 
+      config.QUANTITY, 
+      "auto", 
+      config.DIAMOND_ADDRESS, 
+      config.PARTY_B_WHITELIST, 
+      config.LEVERAGE, 
+      config.HEDGER_URL, 
+      process.env.MUON_URL,
+      config.SYMBOL, 
+      deadline,
+      maxFundingRate
+    )
+
+    //await deallocateForAccount(subAccountAddress,depositAmountWei, config.DIAMOND_ADDRESS, process.env.MUON_URL, config.CHAIN_ID);
     readyToTrade(); //Trading is now allowed...
-    console.log("Bot setup successful. ");
-    await startPriceMonitoring(subAccountAddress, marketId, config.HEDGER_URL, config.SYMBOL, config.LOWER_THRESHOLD_PRICE, config.UPPER_THRESHOLD_PRICE);
+    //console.log("Bot setup successful. ");
+    /*
+    await startPriceMonitoring(
+      subAccountAddress, 
+      config.LOWER_THRESHOLD_PRICE, 
+      config.UPPER_THRESHOLD_PRICE,
+      config.QUANTITY, 
+      config.slippage, 
+      config.DIAMOND_ADDRESS,
+      config.PARTY_B_WHITELIST,
+      config.LEVERAGE,
+      config.HEDGER_URL,
+      config.MUON_URL,
+      config.SYMBOL,
+      deadline,
+      maxFundingRate
+    );
+    */
   } catch (error) {
     console.error("Error in bot setup:", error);
   }
 }
 
-run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);
+run();
+//run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);

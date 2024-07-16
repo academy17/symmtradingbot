@@ -5,7 +5,7 @@ const ArbitrumConfig = require('./configs/chains/arbitrumconfig.js');
 const AccountManagementConfig = require('./configs/accountconfig.js');
 const TradeManagementConfig = require('./configs/tradeconfig.js');
 
-const configType = ConfigTypes.BASE; // Change this value to switch configurations
+const configType = ConfigTypes.POLYGON; // Change this value to switch configurations
 
 let chainConfig;
 
