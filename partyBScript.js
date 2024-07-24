@@ -18,6 +18,7 @@ const { depositABI } = require('./abi/DepositPartyB');
 
 //MUON
 const LockQuoteClient = require('./src/muon/lockquote');
+const OpenPositionClient = require('./src/muon/openposition');
 
 //WEB3 Contracts
 const web3 = new Web3(new Web3.providers.HttpProvider(process.env.PROVIDER_URL));
@@ -30,20 +31,31 @@ const account = web3.eth.accounts.privateKeyToAccount(process.env.WALLET_PRIVATE
 web3.eth.accounts.wallet.add(account);
 console.log("Account address:", account.address);
 
-async function getQuote(quoteId) {
-  try {
-    console.log(`Fetching quote with ID ${quoteId}...`);
-
-    const quote = await diamondContract.methods.getQuote(quoteId).call( {from: process.env.WALLET_ADDRESS} );
-
-    console.log("Quote fetched successfully:", quote);
-    return { success: true, quote: quote };
-  } catch (error) {
-    console.error('Error fetching quote:', error);
-    return { success: false, error: error.toString() };
-  }
+async function getLatestNonce() {
+  return await web3.eth.getTransactionCount(process.env.WALLET_ADDRESS, 'latest');
 }
 
+async function checkAllowance(accountAddress, spenderAddress) {
+  const allowance = await collateralContract.methods.allowance(accountAddress, spenderAddress).call();
+  //console.log(`Allowance for ${spenderAddress} from ${accountAddress}: ${allowance}`);
+  return allowance;
+}
+
+async function fetchQuoteDetails(quoteId) {
+  try {
+    const quote = await diamondContract.methods.getQuote(quoteId).call();
+    console.log("Quote fetched successfully:");
+    const partyA = quote.partyA;
+    const quantity = quote.quantity;
+    const price = quote.requestedOpenPrice;
+    const symbolId = quote.symbolId;
+     
+    return { partyA, quantity, price, symbolId };
+  } catch (error) {
+    console.error('Error fetching quote:', error);
+    return null; 
+  }
+}
 
 
 async function mintCollateralTokens(amount, collateralAddress) {
@@ -77,13 +89,13 @@ async function mintCollateralTokens(amount, collateralAddress) {
   }
 }
 
-async function depositForAccount(accountAddress, amount) {
+async function depositForAccount(accountAddress, diamondContractAddress, amount) {
   try {
     let txNonce = await getLatestNonce();
 
     console.log(`Approving ${amount} tokens for the diamond contract...`);
     const approveTx = collateralContract.methods.approve(diamondContractAddress, amount);
-    const approveGas = await approveTx.estimateGas({ from: process.env.WALLET_ADDRESS });
+    const approveGas = await approveTx.estimateGas({ from: accountAddress });
     const approveGasPrice = await web3.eth.getGasPrice();
 
     const bufferPercentage = 20;
@@ -94,33 +106,66 @@ async function depositForAccount(accountAddress, amount) {
       from: accountAddress,
       gas: adjustedApproveGasLimit.toString(),
       gasPrice: approveGasPrice,
-      nonce: txNonce
+      nonce: txNonce++
     });
 
     console.log(`Approval successful. Depositing for Account: ${accountAddress}...`);
 
+    const allowance = await checkAllowance(accountAddress, diamondContractAddress);
+
+    if (BigInt(allowance) < BigInt(amount)) {
+      throw new Error(`Insufficient allowance: ${allowance}`);
+    }
+
     let txNonceDeposit = await getLatestNonce();
 
-    const depositTx = diamondContract.methods.deposit(accountAddress, amount);
+    const depositTx = diamondContract.methods.deposit(amount);
     const depositGas = await depositTx.estimateGas({ from: accountAddress });
     const depositGasPrice = await web3.eth.getGasPrice();
 
     const adjustedDepositGasLimit = depositGas + (depositGas * bufferFactor / BigInt(100));
 
+    console.log(`Sending deposit transaction with gas limit: ${adjustedDepositGasLimit} and gas price: ${depositGasPrice}`);
+
     const depositReceipt = await depositTx.send({
-      from: process.env.WALLET_ADDRESS,
+      from: accountAddress,
       gas: adjustedDepositGasLimit.toString(),
       gasPrice: depositGasPrice,
       nonce: txNonceDeposit
     });
 
-    console.log("Deposit successful!", depositReceipt);
+    console.log("Deposit successful!");
   } catch (error) {
     console.error("An error occurred during the deposit process:", error);
   }
 }
 
-async function lockQuote(accountAddress, quoteId, increaseNonce, muonUrls, chainId, diamondAddress) {
+async function allocateForPartyB(amount, partyB, partyA) {
+  try {
+
+    console.log(`Allocating ${amount} tokens for PartyB with address ${partyA} from ${partyB}...`);
+
+    const allocateGasEstimate = await diamondContract.methods.allocateForPartyB(amount, partyA).estimateGas({ from: partyB });
+    console.log("Estimated Gas: ", allocateGasEstimate);
+
+    const allocateGasPrice = await web3.eth.getGasPrice();
+    console.log("Current Gas Price: ", allocateGasPrice);
+
+    const receipt = await diamondContract.methods.allocateForPartyB(amount, partyA).send({
+      from: partyB,
+      gas: allocateGasEstimate,
+      gasPrice: allocateGasPrice
+    });
+
+    console.log("Allocation successful!");
+    return { success: true, receipt: receipt };
+  } catch (error) {
+    console.error('Error during allocation:', error);
+    return { success: false, error: error.toString() };
+  }
+}
+
+async function lockQuote(accountAddress, partyA, quoteId, increaseNonce, muonUrls, chainId, diamondAddress) {
   console.log("Locking quote...");
   const lockQuoteClient = LockQuoteClient.createInstance(true);
 
@@ -133,7 +178,7 @@ async function lockQuote(accountAddress, quoteId, increaseNonce, muonUrls, chain
   const urls = [muonUrls];
 
   try {
-    const signatureResult = await lockQuoteClient.getMuonSig(accountAddress, appName, muonUrls, chainId, diamondAddress);
+    const signatureResult = await lockQuoteClient.getMuonSig(accountAddress, partyA, appName, urls, chainId, diamondAddress);
 
     if (signatureResult.success) {
       const { reqId, timestamp, upnl, gatewaySignature, sigs } = signatureResult.signature;
@@ -156,8 +201,8 @@ async function lockQuote(accountAddress, quoteId, increaseNonce, muonUrls, chain
       console.log("Estimated Gas: ", lockQuoteGasEstimate);
 
       const bufferPercentage = 0.50;
-      const bufferFactor = Math.floor(bufferPercentage * 100);
-      const adjustedGasLimit = lockQuoteGasEstimate + Math.floor(lockQuoteGasEstimate * bufferFactor / 100);
+      const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
+      const adjustedGasLimit = lockQuoteGasEstimate + (lockQuoteGasEstimate * bufferFactor / BigInt(100));
       console.log("Adjusted Gas Limit: ", adjustedGasLimit);
 
       const lockQuoteGasPrice = await web3.eth.getGasPrice();
@@ -180,7 +225,7 @@ async function lockQuote(accountAddress, quoteId, increaseNonce, muonUrls, chain
   }
 }
 
-async function openPosition(accountAddress, quoteId, filledAmount, openedPrice, symbolId, muonUrls, chainId, diamondAddress) {
+async function openPosition(accountAddress, partyA, quoteId, filledAmount, openedPrice, symbolId, muonUrls, chainId, diamondAddress) {
   console.log("Opening position...");
   const openPositionClient = OpenPositionClient.createInstance(true);
 
@@ -193,15 +238,18 @@ async function openPosition(accountAddress, quoteId, filledAmount, openedPrice, 
   const urls = [muonUrls];
 
   try {
-    const signatureResult = await openPositionClient.getPairUpnlAndPriceSig(accountAddress, accountAddress, symbolId, appName, urls, chainId, diamondAddress);
+    const signatureResult = await openPositionClient.getPairUpnlAndPriceSig(accountAddress, partyA, symbolId, appName, urls, chainId, diamondAddress);
 
     if (signatureResult.success) {
-      const { reqId, timestamp, upnl, price, gatewaySignature, sigs } = signatureResult.signature;
+      const { reqId, timestamp, uPnlA, uPnlB, price, gatewaySignature, sigs } = signatureResult.signature;
+      //console.log("SignatureResult: ", signatureResult);
+
 
       const upnlSigFormatted = {
         reqId: web3.utils.hexToBytes(reqId),
         timestamp: timestamp.toString(),
-        upnl: upnl.toString(),
+        upnlPartyA: uPnlA.toString(),
+        upnlPartyB: uPnlB.toString(),
         price: price.toString(),
         gatewaySignature: web3.utils.hexToBytes(gatewaySignature),
         sigs: {
@@ -209,16 +257,19 @@ async function openPosition(accountAddress, quoteId, filledAmount, openedPrice, 
           owner: sigs.owner,
           nonce: sigs.nonce,
         }
+        
       };
+
+      //console.log("SIGNATURE FORMATTED: ", upnlSigFormatted);
 
       console.log(`Opening position for quote ${quoteId} for account ${accountAddress}...`);
 
       const openPositionGasEstimate = await diamondContract.methods.openPosition(quoteId, filledAmount, openedPrice, upnlSigFormatted).estimateGas({ from: process.env.WALLET_ADDRESS });
       console.log("Estimated Gas: ", openPositionGasEstimate);
 
-      const bufferPercentage = 0.50;
-      const bufferFactor = Math.floor(bufferPercentage * 100);
-      const adjustedGasLimit = openPositionGasEstimate + Math.floor(openPositionGasEstimate * bufferFactor / 100);
+      const bufferPercentage = 0.50;  
+      const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
+      const adjustedGasLimit = openPositionGasEstimate + (openPositionGasEstimate * bufferFactor / BigInt(100));
       console.log("Adjusted Gas Limit: ", adjustedGasLimit);
 
       const openPositionGasPrice = await web3.eth.getGasPrice();
@@ -244,13 +295,17 @@ async function openPosition(accountAddress, quoteId, filledAmount, openedPrice, 
 
 
 async function run() {
-
+  const quoteId = 991;
+  const quoteDetails = await fetchQuoteDetails(quoteId);
+  console.log("quoteDetails: ", quoteDetails);
   const accountAddress = process.env.WALLET_ADDRESS;
-  console.log("Account Address: ", accountAddress);
   const depositAmountWei = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
   await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
-  await lockQuote(accountAddress, quoteId, 'false', process.env.MUON_URL, config.CHAIN_ID, config.DIAMOND_ADDRESS);
-  //await openPosition(accountAddress, quoteId, filledAmount, openedPrice, symbolId, muonUrls, chainId, diamondAddress);
+  await depositForAccount(accountAddress, config.DIAMOND_ADDRESS, depositAmountWei);
+  await checkAllowance(accountAddress, config.DIAMOND_ADDRESS);
+  await allocateForPartyB(depositAmountWei, process.env.WALLET_ADDRESS, quoteDetails.partyA);
+  await lockQuote(accountAddress, quoteDetails.partyA, quoteId, 'false', process.env.MUON_URL, config.CHAIN_ID, config.DIAMOND_ADDRESS);
+  await openPosition(accountAddress, quoteDetails.partyA, quoteId, quoteDetails.quantity, quoteDetails.price, quoteDetails.symbolId, process.env.MUON_URL, config.CHAIN_ID, config.DIAMOND_ADDRESS);
 }
 
 run();

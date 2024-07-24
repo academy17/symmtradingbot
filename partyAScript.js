@@ -1,7 +1,6 @@
 //CONFIGS
 require('dotenv').config()
 const config = require('./configA');
-
 const { Web3 } = require('web3');
 const WebSocket = require('ws');
 const { toWei, toWeiBN } = require('./src/utils/numbers');
@@ -19,7 +18,6 @@ const { requestToClosePositionFunctionAbi } = require('./abi/RequestToClose');
 //MUON
 const QuotesClient = require('./src/muon/quotes');
 const DeallocateClient = require('./src/muon/deallocate');
-const { start } = require('repl');
 
 //WEB3 Contracts
 const web3 = new Web3(new Web3.providers.HttpProvider(process.env.PROVIDER_URL));
@@ -71,7 +69,7 @@ async function addAccount(accountName) {
     console.error("Failed to add account:", error);
   }
 }
-//Minting Collateral (for test purposes)
+//Minting Collateral (for testing purposes)
 async function mintCollateralTokens(amount, collateralAddress) {
   try {
       const mintTx = collateralContract.methods.mint(process.env.WALLET_ADDRESS, amount);
@@ -246,41 +244,7 @@ async function withdrawFromAccount(accountAddress, amount) {
   }
 }
 
-//Get a signature for a sendQuote
-//TODO: Refactor, redundant function
-/*
-async function getMuonSigImplementation(subAccountAddress, diamondAddress, chainId, marketId) {
-
-  const quotesClient = QuotesClient.createInstance(true);
-
-  if (!quotesClient) {
-      console.log('QuotesClient is not enabled or failed to instantiate.');
-      return { success: false, error: 'QuotesClient initialization failed' };
-  }
-
-  const account = subAccountAddress;
-  const appName = 'symmio';
-  const urls = [process.env.MUON_URL];
-  const chainId = 137; //TODO: Change this to a config value in polygon/arb
-  const contractAddress = diamondAddress;
-  //const marketId = 4; //TODO: Change this to a live variable in the main bot script 
-
-  try {
-    const result = await quotesClient.getMuonSig(account, appName, urls, chainId, contractAddress, marketId);
-
-    if (result.success) {
-      return { success: true, signature: result.signature };
-    } else {
-      throw new Error(result.error || 'Unknown error');
-    }
-  } catch (error) {
-    console.error('Error getting Muon signature:', error);
-    return { success: false, error: error.toString() };
-  }
-}
-  */
-
-//Helper Function to fetch the market by symbol (e.g. BTC)
+//Helper Function to fetch the market information by symbol (e.g. BTC)
 async function fetchMarketSymbolId(url, symbol) {
   if (!url) {
     throw new Error("hedgerUrl is empty");
@@ -355,9 +319,10 @@ async function executeSendQuote(
   partyBWhitelist, 
   leverage, 
   hedgerUrl, 
-  muonUrl,
+  muonUrls,
   symbol, 
   deadline,
+  chainId,
   maxFundingRate) { 
   const { markets } = await fetchMarketSymbolId(hedgerUrl, symbol);
   const marketId = markets[0].id;
@@ -366,9 +331,10 @@ async function executeSendQuote(
 
   const quotesClient = QuotesClient.createInstance(true);
   const appName = 'symmio';
+  const urls = [muonUrls];
 
   //const signatureResult = await getMuonSigImplementation(subAccountAddress, diamondAddress, marketId);
-  const signatureResult = await quotesClient.getMuonSig(subAccountAddress, appName, muonUrl, chainId, diamondAddress, marketId);
+  const signatureResult = await quotesClient.getMuonSig(subAccountAddress, appName, urls, chainId, diamondAddress, marketId);
 
   let adjustedPrice = BigInt(signatureResult.signature.price);
   let numericSlippage;
@@ -481,51 +447,51 @@ async function executeSendQuote(
     [ encodedSendQuoteData ]
   ];
 
-  const calldataEncoded = web3.eth.abi.encodeFunctionCall(_callAbi, _callData);
-  console.log("callDataEncoded: ", calldataEncoded);
-  console.log("Calldata: ", _callData);
+  //const calldataEncoded = web3.eth.abi.encodeFunctionCall(_callAbi, _callData);
+  //console.log("callDataEncoded: ", calldataEncoded);
+  //console.log("Calldata: ", _callData);
 
     try {
       const bufferPercentage = 0.20;
       const bufferFactor = BigInt(Math.floor(bufferPercentage * 100));
       const sendQuoteGasEstimate = await multiAccountContract.methods._call(..._callData).estimateGas({ from: process.env.WALLET_ADDRESS });
       console.log("Estimated Gas: ", sendQuoteGasEstimate);
-            const adjustedGasLimit = sendQuoteGasEstimate + (sendQuoteGasEstimate * bufferFactor / BigInt(100));
+      const adjustedGasLimit = sendQuoteGasEstimate + (sendQuoteGasEstimate * bufferFactor / BigInt(100));
       console.log("Adjusted Gas Limit: ", adjustedGasLimit);
       const sendQuotePrice = await web3.eth.getGasPrice();
       console.log("Current Gas Price: ", sendQuotePrice);
-            const sendQuoteReceipt = await multiAccountContract.methods._call(..._callData).send({
+      const sendQuoteReceipt = await multiAccountContract.methods._call(..._callData).send({
         from: account.address,
         gas: adjustedGasLimit.toString(), 
         gasPrice: sendQuotePrice.toString() 
       });
 
-    const sendQuoteContractAddress = diamondAddress.toLowerCase();
-    const sendQuoteEventSignatureHash = '0x8a17f103c77224ce4d9bab74dad3bd002cd24cf88d2e191e86d18272c8f135dd';
+      const sendQuoteContractAddress = diamondAddress.toLowerCase();
+      const sendQuoteEventSignatureHash = '0x8a17f103c77224ce4d9bab74dad3bd002cd24cf88d2e191e86d18272c8f135dd';
 
-    const sendQuoteLogs = sendQuoteReceipt.logs.filter(log => 
+      const sendQuoteLogs = sendQuoteReceipt.logs.filter(log => 
         log.address.toLowerCase() === sendQuoteContractAddress &&
         log.topics[0] === sendQuoteEventSignatureHash
-    );
+      );
 
-    if (sendQuoteLogs.length > 0) {
-        sendQuoteLogs.forEach(log => {
-            const decodedData = web3.eth.abi.decodeParameters(['address', 'uint256', 'address[]', 'uint256', 'uint8', 'uint8', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'], log.data);
-            console.log("SendQuote ID: ", decodedData[1]); // Assuming quoteId is the second parameter
+      if (sendQuoteLogs.length > 0) {
+        const quoteIds = sendQuoteLogs.map(log => {
+          const decodedData = web3.eth.abi.decodeParameters(['address', 'uint256', 'address[]', 'uint256', 'uint8', 'uint8', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'], log.data);
+          console.log("SendQuote ID: ", decodedData[1]); // Assuming quoteId is the second parameter
+          return decodedData[1]; // Return the quoteId
         });
-    } else {
+        return quoteIds; // Return all the quoteIds found
+      } else {
         console.log("No SendQuote event found.");
+      }
+    } catch (error) {
+      console.error('Error sending quote:', error);
     }
-} catch (error) {
-    console.error('Error sending quote:', error);
-}
 
   } else {
     console.error('Failed to obtain signature:', signatureResult.error);
   }
 }
-
-
 
 //Closing a position
 async function closePosition(accountAddress, quoteId, closePrice, quantityToClose, orderType, deadline) {
@@ -596,7 +562,8 @@ async function startPriceMonitoring(
   muonUrl, 
   symbol, 
   deadline, 
-  maxFundingRate) { 
+  maxFundingRate
+) { 
   let binanceWs; 
   try {
       const { markets } = await fetchMarketSymbolId(hedgerUrl, symbol);
@@ -616,7 +583,6 @@ async function startPriceMonitoring(
         handleMessage(
           message, 
           subAccountAddress, 
-          marketId, 
           binanceWs, 
           lowerThresholdPrice, 
           upperThresholdPrice, 
@@ -628,11 +594,10 @@ async function startPriceMonitoring(
           hedgerUrl, 
           muonUrl, 
           symbol, 
-          marketId, 
           deadline, 
           maxFundingRate
         );
-            });
+      });
   } catch (error) {
       console.error("Error setting up price monitoring:", error);
       closeAndExit(binanceWs, error); 
@@ -646,7 +611,6 @@ let debouncer;
 async function handleMessage(
   message, 
   subAccountAddress, 
-  marketId, 
   binanceWs, 
   lowerThresholdPrice, 
   upperThresholdPrice, 
@@ -658,14 +622,15 @@ async function handleMessage(
   hedgerUrl, 
   muonUrl, 
   symbol, 
-  marketId, 
   deadline, 
-  maxFundingRate) {
-    if (actionTaken) return;
+  maxFundingRate
+) {
+  if (actionTaken) return;
 
+  try {
     const data = JSON.parse(message);
     const price = parseFloat(data.data.c);
-    console.log(`Current Price of ${config.SYMBOL}: `, price, "Lower:", config.LOWER_THRESHOLD_PRICE, "Upper:", config.UPPER_THRESHOLD_PRICE);
+    console.log(`Current Price of ${symbol}: ${price}, Lower: ${lowerThresholdPrice}, Upper: ${upperThresholdPrice}`);
 
     if (price > upperThresholdPrice && accountSetup && !actionTaken) {
         console.log(`Price over threshold: ${price}`);
@@ -674,18 +639,18 @@ async function handleMessage(
             console.log("Shorting...");
             const quoteId = await executeSendQuote(
               subAccountAddress, 
-              positionType, 
-              orderType, 
+              1, // SHORT
+              1, 
               quantity, 
               slippage, 
-              diamondAddress,
+              diamondAddress, 
               partyBWhitelist, 
               leverage, 
               hedgerUrl, 
-              muonUrl, 
+              muonUrl,
               symbol, 
-              marketId, 
-              deadline, 
+              deadline,
+              config.CHAIN_ID,
               maxFundingRate
             );
             console.log("Short Successful! Quote Id: ", quoteId);
@@ -701,18 +666,18 @@ async function handleMessage(
             console.log("Longing...");
             const quoteId = await executeSendQuote(
               subAccountAddress, 
-              positionType, 
-              orderType, 
+              0, // LONG
+              1, 
               quantity, 
               slippage, 
-              diamondAddress,
+              diamondAddress, 
               partyBWhitelist, 
               leverage, 
               hedgerUrl, 
-              muonUrl, 
+              muonUrl,
               symbol, 
-              marketId, 
-              deadline, 
+              deadline,
+              config.CHAIN_ID,
               maxFundingRate
             );
             console.log("Long Successful! Quote Id: ", quoteId);
@@ -722,6 +687,11 @@ async function handleMessage(
             closeAndExit(binanceWs);
         }
     }
+  } catch (error) {
+    console.error("Error in handleMessage:", error);
+  }
+
+
 
     clearTimeout(debouncer);
     debouncer = setTimeout(() => {
@@ -729,57 +699,36 @@ async function handleMessage(
     }, 30000);
 }
 
+
 async function run() {
   const maxFundingRate = web3.utils.toWei('200', 'ether'); 
-  const deadline = (Math.floor(Date.now() / 1000) + 86400).toString();
-
+  const quoteDeadline = (Math.floor(Date.now() / 1000) + 86400).toString(); //Deadline is 24 hours after partyA sends a Quote
   try {
-    const subAccountAddress = '0x49DE275B9890C4F93Ca37756da40eA37a4cefBAD';
+    const subAccountAddress = await addAccount("TESTAccount");
     console.log("SubAccountAddress: ", subAccountAddress);
     const depositAmountWei = web3.utils.toWei(config.DEPOSIT_AMOUNT, 'ether'); 
-    //await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
-    //await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
-
-    await executeSendQuote(
-      subAccountAddress, 
-      1, 
-      1, 
-      config.QUANTITY, 
-      "auto", 
-      config.DIAMOND_ADDRESS, 
-      config.PARTY_B_WHITELIST, 
-      config.LEVERAGE, 
-      config.HEDGER_URL, 
-      process.env.MUON_URL,
-      config.SYMBOL, 
-      deadline,
-      maxFundingRate
-    )
-
-    //await deallocateForAccount(subAccountAddress,depositAmountWei, config.DIAMOND_ADDRESS, process.env.MUON_URL, config.CHAIN_ID);
+    await mintCollateralTokens(depositAmountWei, config.COLLATERAL_ADDRESS);
+    await depositAndAllocateForAccount(subAccountAddress, depositAmountWei, config.MULTI_ACCOUNT_ADDRESS);
     readyToTrade(); //Trading is now allowed...
-    //console.log("Bot setup successful. ");
-    /*
+    console.log("Bot setup successful. ");
     await startPriceMonitoring(
       subAccountAddress, 
       config.LOWER_THRESHOLD_PRICE, 
       config.UPPER_THRESHOLD_PRICE,
       config.QUANTITY, 
-      config.slippage, 
+      config.SLIPPAGE, 
       config.DIAMOND_ADDRESS,
       config.PARTY_B_WHITELIST,
       config.LEVERAGE,
       config.HEDGER_URL,
-      config.MUON_URL,
+      process.env.MUON_URL,
       config.SYMBOL,
-      deadline,
+      quoteDeadline,
       maxFundingRate
     );
-    */
   } catch (error) {
     console.error("Error in bot setup:", error);
   }
 }
 
 run();
-//run().then(() => console.log("Bot is now monitoring prices for trading signals...")).catch(console.error);

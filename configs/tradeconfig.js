@@ -5,6 +5,7 @@ const TradeManagementConfig = {
     QUANTITY: 163.1,
     LEVERAGE: 2,
     ORDERTYPE: 1,
+    SLIPPAGE: "auto",
   };
 
   module.exports = TradeManagementConfig;

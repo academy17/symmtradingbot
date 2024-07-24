@@ -24,6 +24,7 @@ class OpenPositionClient extends MuonClient {
           const res = await this._sendRequest(url, appName, requestParams);
           if (res && res.success) {
             result = res.result;
+            //console.log("Full Signature: ", result);
             success = true;
             break; // Exit the loop if successful
           }
@@ -35,17 +36,22 @@ class OpenPositionClient extends MuonClient {
       if (success) {
         const reqId = result.result.reqId;
         const timestamp = result.result.data.timestamp ? BigInt(result.result.data.timestamp) : BigInt(0);
-        const upnl = result.result.data.result.uPnl ? BigInt(result.result.data.result.uPnl) : BigInt(0);
+        const uPnlA = result.result.data.result.uPnlA ? BigInt(result.result.data.result.uPnlA) : BigInt(0);
+        const uPnlB = result.result.data.result.uPnlB ? BigInt(result.result.data.result.uPnlB) : BigInt(0);
         const price = result.result.data.result.price ? BigInt(result.result.data.result.price) : BigInt(0);
         const gatewaySignature = result.result.nodeSignature;
         const signature = result.result.signatures[0].signature;
         const owner = result.result.signatures[0].owner;
         const nonce = result.result.data.init.nonceAddress;
 
+        console.log("UpnlA from client: ", uPnlA);
+        console.log("UpnlB from client: ", uPnlB);
+
         const generatedSignature = {
           reqId,
           timestamp,
-          upnl,
+          uPnlA,
+          uPnlB,
           price,
           gatewaySignature,
           sigs: { signature, owner, nonce },
